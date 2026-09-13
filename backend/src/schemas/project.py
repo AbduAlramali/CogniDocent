@@ -40,3 +40,9 @@ class ProjectResponse(ProjectBase):
     doc_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
+    thumbnails: Optional[dict] = None
+
+
+class ProjectCreatedResponse(BaseModel):
+    project_id: uuid.UUID
+    doc_id: uuid.UUID

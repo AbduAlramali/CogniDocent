@@ -2,8 +2,8 @@ from typing import Optional, List, Any
 import uuid
 
 from src.core.dtos.llm_provider_dtos import EmbeddingConfigDTO
-from src.schemas.document_page import PageUpdateDTO
-from src.core.interfaces.idocument_page_repository import IDocumentPageRepository
+from src.schemas.document_chunk import ChunkUpdateDTO
+from src.core.interfaces.idocument_chunk_repository import IDocumentChunkRepository
 from src.core.interfaces.iembedding_provider import IEmbeddingProvider
 from src.core.interfaces.ilogger import ILogger
 
@@ -15,15 +15,23 @@ class EmbeddingService:
 
     def __init__(
         self,
-        document_page_repo: IDocumentPageRepository,
+        document_chunk_repo: IDocumentChunkRepository,
         embedding_provider: IEmbeddingProvider,
         logger: ILogger,
-        pdf_service: Optional[Any] = None,
-        vision_llm: Optional[Any] = None,
     ) -> None:
-        self.repo = document_page_repo
+        self.repo = document_chunk_repo
         self.embedding_provider = embedding_provider
         self.logger = logger
+
+    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """Compute vector embeddings for a batch of text strings."""
+        if not texts:
+            return []
+        return await self.embedding_provider.embed_batch(texts)
+
+    async def embed_text(self, text: str) -> List[float]:
+        """Compute vector embedding for a single text string."""
+        return await self.embedding_provider.embed_text(text)
 
     async def update_project_embedding_model(
         self, project_id: uuid.UUID, config: EmbeddingConfigDTO
@@ -78,31 +86,31 @@ class EmbeddingService:
                 active_model=config.model_name,
             )
 
-    async def reembed_project_pages(
+    async def reembed_project_chunks(
         self,
         project_id: uuid.UUID,
         batch_size: int = 50,
     ) -> int:
         """
-        Use case: batch embedding routine for project pages missing content embeddings.
+        Use case: batch embedding routine for project chunks missing content embeddings.
         """
-        missing_pages = await self.repo.get_pages_missing_embeddings(
+        missing_chunks = await self.repo.get_chunks_missing_embeddings(
             project_id=project_id,
             batch_size=batch_size,
         )
-        if not missing_pages:
+        if not missing_chunks:
             return 0
 
-        texts = [p.content for p in missing_pages]
+        texts = [c.content for c in missing_chunks]
         embeddings = await self.embedding_provider.embed_batch(texts)
 
-        updates: List[PageUpdateDTO] = [
-            PageUpdateDTO(page_id=page.page_id, content_vector=emb)
-            for page, emb in zip(missing_pages, embeddings)
+        updates: List[ChunkUpdateDTO] = [
+            ChunkUpdateDTO(chunk_id=chunk.chunk_id, content_vector=emb)
+            for chunk, emb in zip(missing_chunks, embeddings)
         ]
-        await self.repo.update_pages(updates)
+        await self.repo.update_chunks(updates)
         self.logger.info(
-            "Populated missing embeddings for project pages",
+            "Populated missing embeddings for project chunks",
             count=len(updates),
             project_id=project_id,
         )

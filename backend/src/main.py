@@ -7,10 +7,27 @@ from contextlib import asynccontextmanager
 from starlette.middleware.cors import CORSMiddleware
 from src.core.config import (
     get_app_settings,
+    get_minio_settings,
+    get_redis_settings,
 )
 from src.core.middleware import (
     RequestIdMiddleware,
     LoggingMiddleware,
+)
+from src.infra.clients import (
+    minio_client,
+    redis_client,
+    httpx_client,
+)
+from src.routers.v1 import (
+    chat,
+    dev,
+    document,
+    message,
+    notifications,
+    project,
+    provider,
+    tts,
 )
 
 app_settings = get_app_settings()
@@ -26,9 +43,36 @@ async def lifespan(app: FastAPI):
         f"The App {app_settings.APP_NAME} is running in {app_settings.APP_ENV} mode"
     )
 
+    # 1. Initialize HTTPX client
+    httpx_client.initialize()
+
+    # 2. Initialize Redis client
+    try:
+        redis_settings = get_redis_settings()
+        await redis_client.initialize(str(redis_settings.redis_url))
+        logger.info("Redis client initialized")
+    except Exception as e:
+        logger.warning("Redis client initialization skipped or failed", exc=e)
+
+    # 3. Initialize MinIO client and configure buckets/events
+    try:
+        minio_settings = get_minio_settings()
+        minio_client.initialize(minio_settings, app_settings)
+        async with minio_client.get_client() as s3_client:
+            await minio_client.setup_minio_events(s3_client, minio_settings, logger)
+        logger.info("MinIO client initialized and buckets configured")
+    except Exception as e:
+        logger.warning("MinIO client initialization skipped or failed", exc=e)
+
     yield
 
     logger.info("Application shutdown: Cleaning up resources")
+    if redis_client.client is not None:
+        await redis_client.close()
+    if httpx_client.client is not None:
+        await httpx_client.close()
+    await minio_client.close()
+
 
 
 app = FastAPI(
@@ -78,6 +122,13 @@ async def health_check():
 
 
 v1_router = APIRouter(prefix="/v1")
+v1_router.include_router(project.router)
+v1_router.include_router(chat.router)
+v1_router.include_router(message.router)
+v1_router.include_router(document.router)
+v1_router.include_router(provider.router)
+v1_router.include_router(tts.router)
+v1_router.include_router(notifications.router)
 
 if get_app_settings().APP_ENV == "development":
     v1_router.include_router(dev.router)

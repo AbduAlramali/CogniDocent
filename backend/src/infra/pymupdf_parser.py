@@ -3,10 +3,10 @@
 from pathlib import Path
 from typing import Any, Iterator, List, Union
 
-from src.core.dtos.fast_parser_dto import (
-    FastDocumentMetadataDTO,
-    FastPageContentDTO,
-    FastParsedDocumentDTO,
+from src.core.dtos.parser_dtos import (
+    DocumentMetadataDTO,
+    PageContentDTO,
+    ParsedDocumentDTO,
     TOCItemDTO,
 )
 from src.core.exceptions.fast_parser_exceptions import (
@@ -66,7 +66,7 @@ class PyMuPDFParser(IFastParser):
 
         return doc
 
-    def extract_document(self, file_path: Union[str, Path]) -> FastParsedDocumentDTO:
+    def extract_document(self, file_path: Union[str, Path]) -> ParsedDocumentDTO:
         path_str = str(file_path)
         self._logger.info("Starting bulk document extraction", file_path=path_str)
 
@@ -82,7 +82,7 @@ class PyMuPDFParser(IFastParser):
                 total_pages=len(pages),
                 toc_entries_count=len(toc),
             )
-            return FastParsedDocumentDTO(
+            return ParsedDocumentDTO(
                 metadata=metadata,
                 table_of_contents=toc,
                 pages=pages,
@@ -109,7 +109,7 @@ class PyMuPDFParser(IFastParser):
 
     def extract_pages_stream(
         self, file_path: Union[str, Path]
-    ) -> Iterator[FastPageContentDTO]:
+    ) -> Iterator[PageContentDTO]:
         doc = self._open_doc(file_path)
         try:
             yield from self._extract_pages(doc, file_path)
@@ -128,7 +128,7 @@ class PyMuPDFParser(IFastParser):
 
     def extract_single_page(
         self, file_path: Union[str, Path], page_num: int
-    ) -> FastPageContentDTO:
+    ) -> PageContentDTO:
         path_str = str(file_path)
         doc = self._open_doc(file_path)
         try:
@@ -165,7 +165,7 @@ class PyMuPDFParser(IFastParser):
         finally:
             doc.close()
 
-    def extract_metadata(self, file_path: Union[str, Path]) -> FastDocumentMetadataDTO:
+    def extract_metadata(self, file_path: Union[str, Path]) -> DocumentMetadataDTO:
         doc = self._open_doc(file_path)
         try:
             return self._extract_metadata(doc, file_path)
@@ -218,15 +218,62 @@ class PyMuPDFParser(IFastParser):
         finally:
             doc.close()
 
+    def _locate_bbox_on_page(self, page: Any, text: str) -> list[float]:
+        clean_text = " ".join(text.split())
+        rects = page.search_for(clean_text)
+        if rects:
+            return [
+                min(r.x0 for r in rects),
+                min(r.y0 for r in rects),
+                max(r.x1 for r in rects),
+                max(r.y1 for r in rects),
+            ]
+        words = clean_text.split()
+        prefix = " ".join(words[:4])
+        suffix = " ".join(words[-4:])
+        all_rects = page.search_for(prefix) + page.search_for(suffix)
+        if all_rects:
+            return [
+                min(r.x0 for r in all_rects),
+                min(r.y0 for r in all_rects),
+                max(r.x1 for r in all_rects),
+                max(r.y1 for r in all_rects),
+            ]
+        return [0.0, 0.0, 0.0, 0.0]
+
+    def extract_chunk_bboxes(
+        self, file_path: Union[str, Path], chunks: list[tuple[int, str]]
+    ) -> list[list[float]]:
+        doc = self._open_doc(file_path)
+        try:
+            results: list[list[float]] = []
+            for page_num, text in chunks:
+                page = doc[page_num - 1]
+                bbox = self._locate_bbox_on_page(page, text)
+                results.append(bbox)
+            return results
+        finally:
+            doc.close()
+
+    def extract_text_bbox(
+        self, file_path: Union[str, Path], page_num: int, text: str
+    ) -> list[float]:
+        doc = self._open_doc(file_path)
+        try:
+            page = doc[page_num - 1]
+            return self._locate_bbox_on_page(page, text)
+        finally:
+            doc.close()
+
     # --- Internal Extraction Helpers ---
 
     def _extract_metadata(
         self, doc: Any, file_path: Union[str, Path]
-    ) -> FastDocumentMetadataDTO:
+    ) -> DocumentMetadataDTO:
         meta = doc.metadata or {}
         file_size = Path(file_path).stat().st_size if Path(file_path).exists() else 0
 
-        return FastDocumentMetadataDTO(
+        return DocumentMetadataDTO(
             total_pages=doc.page_count,
             file_size_bytes=file_size,
             title=meta.get("title"),
@@ -256,14 +303,14 @@ class PyMuPDFParser(IFastParser):
 
     def _extract_pages(
         self, doc: Any, file_path: Union[str, Path]
-    ) -> Iterator[FastPageContentDTO]:
+    ) -> Iterator[PageContentDTO]:
         for page_index in range(len(doc)):
             page = doc[page_index]
             yield self._parse_single_page(page, page_index + 1, str(file_path))
 
     def _parse_single_page(
         self, page: Any, page_num: int, file_path: str
-    ) -> FastPageContentDTO:
+    ) -> PageContentDTO:
         try:
             raw_text = page.get_text()
             char_count = len(raw_text)
@@ -272,11 +319,9 @@ class PyMuPDFParser(IFastParser):
             has_images = len(images) > 0
 
             tables = page.find_tables()
-            has_tables = (
-                len(tables.tables) > 0 if hasattr(tables, "tables") else len(tables) > 0
-            )
+            has_tables = len(tables.tables) > 0
 
-            return FastPageContentDTO(
+            return PageContentDTO(
                 page_num=page_num,
                 raw_text=raw_text,
                 char_count=char_count,

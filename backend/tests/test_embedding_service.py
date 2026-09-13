@@ -4,28 +4,28 @@ from unittest.mock import AsyncMock, MagicMock
 
 from src.core.dtos.llm_provider_dtos import EmbeddingConfigDTO
 from src.core.enums import EmbeddingProvider
-from src.core.interfaces.idocument_page_repository import IDocumentPageRepository
+from src.core.interfaces.idocument_chunk_repository import IDocumentChunkRepository
 from src.core.interfaces.iembedding_provider import IEmbeddingProvider
 from src.core.interfaces.ivision_provider import IVisionProvider
 from src.core.interfaces.ilogger import ILogger
-from src.models.document_page import DocumentPage
-from src.schemas.document_page import DocumentPageResponse, PageUpdateDTO
+from src.models.document_chunk import DocumentChunk
+from src.schemas.document_chunk import DocumentChunkResponse, ChunkUpdateDTO
 from src.services.embedding_service import EmbeddingService
 from src.services.pdf_service import PDFService
 
 
 @pytest.fixture
 def mock_repo():
-    repo = AsyncMock(spec=IDocumentPageRepository)
+    repo = AsyncMock(spec=IDocumentChunkRepository)
     repo.get_embedding_metadata = AsyncMock()
     repo.alter_embedding_dimensions = AsyncMock()
     repo.nullify_project_embeddings = AsyncMock()
     repo.upsert_embedding_metadata = AsyncMock()
     repo.count_populated_embeddings = AsyncMock()
-    repo.search_pages_vector = AsyncMock()
-    repo.get_fallback_pages = AsyncMock()
-    repo.get_pages_missing_embeddings = AsyncMock()
-    repo.update_pages = AsyncMock()
+    repo.search_chunks_vector = AsyncMock()
+    repo.get_fallback_chunks = AsyncMock()
+    repo.get_chunks_missing_embeddings = AsyncMock()
+    repo.update_chunks = AsyncMock()
     return repo
 
 
@@ -57,13 +57,11 @@ def mock_vision_llm():
 
 
 @pytest.fixture
-def service(mock_repo, mock_provider, mock_logger, mock_pdf_service, mock_vision_llm):
+def service(mock_repo, mock_provider, mock_logger):
     return EmbeddingService(
-        document_page_repo=mock_repo,
+        document_chunk_repo=mock_repo,
         embedding_provider=mock_provider,
         logger=mock_logger,
-        pdf_service=mock_pdf_service,
-        vision_llm=mock_vision_llm,
     )
 
 
@@ -132,23 +130,47 @@ async def test_update_project_embedding_model_skip_when_same(service, mock_repo)
 
 
 @pytest.mark.asyncio
-async def test_reembed_project_pages(service, mock_repo, mock_provider):
+async def test_reembed_project_chunks(service, mock_repo, mock_provider):
     project_id = uuid.uuid4()
-    page_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
     doc_id = uuid.uuid4()
 
-    mock_page = DocumentPageResponse(
-        page_id=page_id,
+    mock_chunk = DocumentChunkResponse(
+        chunk_id=chunk_id,
         doc_id=doc_id,
+        chunk_index=0,
         page_num=1,
-        content="Test page content",
+        content="Test chunk content",
     )
-    mock_repo.get_pages_missing_embeddings.return_value = [mock_page]
+    mock_repo.get_chunks_missing_embeddings.return_value = [mock_chunk]
 
-    count = await service.reembed_project_pages(project_id=project_id, batch_size=10)
+    count = await service.reembed_project_chunks(project_id=project_id, batch_size=10)
 
     assert count == 1
-    mock_provider.embed_batch.assert_called_once_with(["Test page content"])
-    mock_repo.update_pages.assert_called_once_with(
-        [PageUpdateDTO(page_id=page_id, content_vector=[0.1, 0.2, 0.3])]
+    mock_provider.embed_batch.assert_called_once_with(["Test chunk content"])
+    mock_repo.update_chunks.assert_called_once_with(
+        [ChunkUpdateDTO(chunk_id=chunk_id, content_vector=[0.1, 0.2, 0.3])]
     )
+
+
+@pytest.mark.asyncio
+async def test_embed_batch(service, mock_provider):
+    texts = ["hello", "world"]
+    result = await service.embed_batch(texts)
+    assert result == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+    mock_provider.embed_batch.assert_called_once_with(texts)
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_empty(service, mock_provider):
+    result = await service.embed_batch([])
+    assert result == []
+    mock_provider.embed_batch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_embed_text(service, mock_provider):
+    result = await service.embed_text("sample text")
+    assert result == [0.1, 0.2, 0.3]
+    mock_provider.embed_text.assert_called_once_with("sample text")
+

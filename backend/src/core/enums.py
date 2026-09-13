@@ -37,6 +37,17 @@ class EmbeddingProvider(str, Enum):
     FASTEMBED = "FASTEMBED"
 
 
+class ScanStatus(str, Enum):
+    CLEAN = "CLEAN"
+    INFECTED = "INFECTED"
+    FAILED = "FAILED"
+
+
+class FileType(str, Enum):
+    ATTACHMENT = "attachment"
+    DOCUMENT = "document"
+
+
 class UploadStatus(str, Enum):
     """
     Enum representing the status of a file upload.

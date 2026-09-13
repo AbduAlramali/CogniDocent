@@ -21,11 +21,11 @@ class EmbeddingVectorDTO:
 
 
 @dataclass(frozen=True)
-class PageEmbeddingUpdateDTO:
+class ChunkEmbeddingUpdateDTO:
     """
-    Domain DTO representing an embedding update payload for a document page.
+    Domain DTO representing an embedding update payload for a document chunk.
     Eliminates primitive obsession (tuples) across domain ports and adapters.
     """
 
-    page_id: uuid.UUID
+    chunk_id: uuid.UUID
     embedding: List[float]

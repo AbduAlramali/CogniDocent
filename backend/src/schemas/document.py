@@ -9,6 +9,7 @@ class DocumentBase(BaseModel):
     primary_name: str
     content_type: str = "application/pdf"
     status: UploadStatus = UploadStatus.PROCESSING
+    thumbnails: Optional[Dict[str, Any]] = None
 
 
 class DocumentCreate(DocumentBase):
@@ -22,6 +23,7 @@ class DocumentUpdate(BaseModel):
     status: Optional[str] = None
     toc: Optional[List[Dict[str, Any]]] = None
     doc_metadata: Optional[Dict[str, Any]] = Field(default=None, alias="metadata")
+    thumbnails: Optional[Dict[str, Any]] = None
 
 
 class DocumentDelete(BaseModel):
@@ -45,3 +47,14 @@ class DocumentResponse(DocumentBase):
     uploaded_at: datetime
     toc: Optional[List[Dict[str, Any]]] = None
     doc_metadata: Optional[Dict[str, Any]] = Field(default=None, alias="metadata")
+    thumbnails: Optional[Dict[str, Any]] = None
+
+
+class PageDescriptionResponse(BaseModel):
+    """
+    Response schema for requested page multimodal description.
+    """
+    document_id: uuid.UUID
+    page_num: int
+    description: str
+

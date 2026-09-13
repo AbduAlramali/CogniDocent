@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from src.core.config import get_ai_settings
 from src.core.enums import Role, ThinkingLevel, ChatProvider, EmbeddingProvider
 from pydantic import Field
 
@@ -30,8 +31,17 @@ class DomainMessageDTO:
 
     role: Role
     content: str
+    images: List[str] = field(default_factory=list)
     tool_calls: List[ToolCallDTO] = field(default_factory=list)
     tool_call_id: Optional[str] = None  # Used when role == TOOL
+
+
+@dataclass(frozen=True)
+class CitationMetadata:
+    ref_id: str  # e.g., "chunk_982"
+    page: int  # e.g., 4
+    bbox: List[float]  # e.g., [100.0, 250.0, 400.0, 300.0] for PDF highlighting
+    source_name: str  # e.g., "NVIDIA RTX Architecture.pdf"
 
 
 @dataclass(frozen=True)
@@ -42,6 +52,8 @@ class LLMResponseDTO:
     finish_reason: str
     input_tokens: int = 0
     output_tokens: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    citations: List[CitationMetadata] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -76,8 +88,13 @@ class LLMRouteConfigDTO(BaseLLMConfigDTO):
 class EmbeddingConfigDTO(BaseLLMConfigDTO):
     """Configuration for the active embedding engine."""
 
+    model_name: str = field(
+        default_factory=lambda: get_ai_settings().DEFAULT_EMBEDDING_MODEL
+    )
     provider: EmbeddingProvider = EmbeddingProvider.OPENAI
-    dimensions: int = 768
+    dimensions: int = field(
+        default_factory=lambda: get_ai_settings().DEFAULT_EMBEDDING_DIMENSIONS
+    )
     timeout_seconds: int = 60
 
 

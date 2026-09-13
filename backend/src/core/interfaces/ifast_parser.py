@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterator, List, Union
 
-from src.core.dtos.fast_parser_dto import (
-    FastDocumentMetadataDTO,
-    FastPageContentDTO,
-    FastParsedDocumentDTO,
+from src.core.dtos.parser_dtos import (
+    DocumentMetadataDTO,
+    PageContentDTO,
+    ParsedDocumentDTO,
     TOCItemDTO,
 )
 
@@ -16,14 +16,14 @@ class IFastParser(ABC):
     """Interface for high-throughput, low-latency CPU document parsing (Tier-1)."""
 
     @abstractmethod
-    def extract_document(self, file_path: Union[str, Path]) -> FastParsedDocumentDTO:
+    def extract_document(self, file_path: Union[str, Path]) -> ParsedDocumentDTO:
         """Extracts all raw page texts, table of contents, and header metadata in bulk.
 
         Args:
             file_path: Absolute or relative system path to the target PDF file.
 
         Returns:
-            FastParsedDocumentDTO containing full text and structural metadata.
+            ParsedDocumentDTO containing full text and structural metadata.
 
         Raises:
             DocumentNotFoundError: If the file does not exist.
@@ -36,14 +36,14 @@ class IFastParser(ABC):
     @abstractmethod
     def extract_pages_stream(
         self, file_path: Union[str, Path]
-    ) -> Iterator[FastPageContentDTO]:
+    ) -> Iterator[PageContentDTO]:
         """Yields extracted page data page-by-page as a generator to minimize peak memory consumption.
 
         Args:
             file_path: Absolute or relative system path to the target PDF file.
 
         Yields:
-            FastPageContentDTO for each processed page sequentially.
+            PageContentDTO for each processed page sequentially.
 
         Raises:
             DocumentNotFoundError: If the file does not exist.
@@ -55,7 +55,7 @@ class IFastParser(ABC):
     @abstractmethod
     def extract_single_page(
         self, file_path: Union[str, Path], page_num: int
-    ) -> FastPageContentDTO:
+    ) -> PageContentDTO:
         """Extracts raw text and metadata for an isolated page.
 
         Args:
@@ -63,7 +63,7 @@ class IFastParser(ABC):
             page_num: 1-indexed target page number.
 
         Returns:
-            FastPageContentDTO containing extracted page details.
+            PageContentDTO containing extracted page details.
 
         Raises:
             PageExtractionError: If page_num is out of bounds or extraction fails.
@@ -85,14 +85,14 @@ class IFastParser(ABC):
         pass
 
     @abstractmethod
-    def extract_metadata(self, file_path: Union[str, Path]) -> FastDocumentMetadataDTO:
+    def extract_metadata(self, file_path: Union[str, Path]) -> DocumentMetadataDTO:
         """Reads fast header-level metadata without parsing body text.
 
         Args:
             file_path: Path to the target PDF.
 
         Returns:
-            FastDocumentMetadataDTO with page counts and author/title fields.
+            DocumentMetadataDTO with page counts and author/title fields.
         """
         pass
 
@@ -114,4 +114,18 @@ class IFastParser(ABC):
             DocumentNotFoundError: If the file does not exist.
             PageExtractionError: If page_num is out of bounds or rendering fails.
         """
+        pass
+
+    @abstractmethod
+    def extract_chunk_bboxes(
+        self, file_path: Union[str, Path], chunks: list[tuple[int, str]]
+    ) -> list[list[float]]:
+        """Extracts bounding boxes [x0, y0, x1, y1] for a sequence of (page_num, chunk_text) pairs."""
+        pass
+
+    @abstractmethod
+    def extract_text_bbox(
+        self, file_path: Union[str, Path], page_num: int, text: str
+    ) -> list[float]:
+        """Extracts bounding box [x0, y0, x1, y1] for a text segment on a page."""
         pass

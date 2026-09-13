@@ -5,14 +5,19 @@ from src.core.dtos.llm_provider_dtos import (
     DomainMessageDTO,
     LLMResponseDTO,
     StreamChunkDTO,
-    SystemAIConfigDTO,
 )
+from src.core.dtos.universal_dtos import ThreadStateDTO
 
 
 class IChatOrchestrator(ABC):
     @abstractmethod
     async def process_turn(
-        self, thread_id: UUID, user_message: DomainMessageDTO, config: SystemAIConfigDTO
+        self,
+        thread_id: UUID,
+        user_message: DomainMessageDTO,
+        config: ThreadStateDTO,
+        history_messages: list | None = None,
+        images_to_caption: list | None = None,
     ) -> LLMResponseDTO:
         """Executes the complete conversational graph synchronously.
 
@@ -27,7 +32,7 @@ class IChatOrchestrator(ABC):
 
     @abstractmethod
     async def stream_turn(
-        self, thread_id: UUID, user_message: DomainMessageDTO, config: SystemAIConfigDTO
+        self, thread_id: UUID, user_message: DomainMessageDTO, config: ThreadStateDTO
     ) -> AsyncIterator[StreamChunkDTO]:
         """Streams the execution of the conversational graph.
 

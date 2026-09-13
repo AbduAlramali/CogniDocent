@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+import operator
+from typing import Annotated
+from dataclasses import dataclass, field
 from typing import Optional
 import uuid
 from src.core.dtos.llm_provider_dtos import SystemAIConfigDTO
@@ -10,4 +12,8 @@ class ThreadStateDTO:
 
     project_id: uuid.UUID
     document_id: uuid.UUID
-    config: Optional[SystemAIConfigDTO] = None
+    config: SystemAIConfigDTO
+    active_attachments: Annotated[list[uuid.UUID], operator.add] = field(
+        default_factory=list
+    )
+    generate_chat_title: bool = False

@@ -14,7 +14,7 @@ class TOCItemDTO:
 
 
 @dataclass(frozen=True)
-class FastPageContentDTO:
+class PageContentDTO:
     """Extracted CPU-level text and basic metadata for a single document page."""
 
     page_num: int
@@ -25,7 +25,7 @@ class FastPageContentDTO:
 
 
 @dataclass(frozen=True)
-class FastDocumentMetadataDTO:
+class DocumentMetadataDTO:
     """High-level metadata extracted from document headers."""
 
     total_pages: int
@@ -38,9 +38,9 @@ class FastDocumentMetadataDTO:
 
 
 @dataclass(frozen=True)
-class FastParsedDocumentDTO:
+class ParsedDocumentDTO:
     """Complete document representation returned after Tier-1 bulk processing."""
 
-    metadata: FastDocumentMetadataDTO
+    metadata: DocumentMetadataDTO
     table_of_contents: List[TOCItemDTO]
-    pages: List[FastPageContentDTO]
+    pages: List[PageContentDTO]

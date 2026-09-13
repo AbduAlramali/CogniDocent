@@ -1,6 +1,7 @@
 from .agent_prompts import (
     AGENT_SYSTEM_PROMPT,
     EVALUATOR_JUDGE_PROMPT_TEMPLATE,
+    IMAGE_CAPTION_PROMPT_TEMPLATE,
 )
 from .audio_prompts import (
     AUDIO_SCRIPT_PROMPT_TEMPLATE,
@@ -9,5 +10,6 @@ from .audio_prompts import (
 __all__ = [
     "AGENT_SYSTEM_PROMPT",
     "EVALUATOR_JUDGE_PROMPT_TEMPLATE",
+    "IMAGE_CAPTION_PROMPT_TEMPLATE",
     "AUDIO_SCRIPT_PROMPT_TEMPLATE",
 ]

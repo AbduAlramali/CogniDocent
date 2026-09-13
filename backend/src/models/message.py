@@ -74,5 +74,46 @@ class Message(Base):
         "Media", back_populates="message", cascade="all, delete-orphan"
     )
 
+    @property
+    def image_captions(self) -> list[str]:
+        """
+        Captions of associated image media files that do not have entries in media_chunks.
+        """
+        if not self.media:
+            return []
+        return [
+            m.caption
+            for m in self.media
+            if m.caption and not getattr(m, "has_chunks", False)
+        ]
+
+    @property
+    def image_attachments(self) -> list[Media]:
+        """
+        Image media attachments that do not have entries in media_chunks.
+        """
+        if not self.media:
+            return []
+        return [
+            m
+            for m in self.media
+            if (m.content_type or "").startswith("image/") and not getattr(m, "has_chunks", False)
+        ]
+
+    @property
+    def doc_attachments(self) -> list[Media]:
+        """
+        Document, text, or chunked media attachments.
+        """
+        if not self.media:
+            return []
+        return [
+            m
+            for m in self.media
+            if not ((m.content_type or "").startswith("image/") and not getattr(m, "has_chunks", False))
+        ]
+
     def __repr__(self) -> str:
         return f"<Message(message_id={self.message_id}, chat_id={self.chat_id}, role={self.role})>"
+
+

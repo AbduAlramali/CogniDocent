@@ -60,3 +60,15 @@ class AudioExplanationService:
         # 3. Stream the audio bytes back to the caller
         async for audio_chunk in self.tts.stream_audio(script_text, voice=voice):
             yield audio_chunk
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice: str = "alloy",
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Takes raw text and streams generated audio chunks back to the client.
+        """
+        async for audio_chunk in self.tts.stream_audio(text, voice=voice):
+            yield audio_chunk
+

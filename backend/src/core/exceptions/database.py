@@ -43,9 +43,9 @@ class DocumentNotFoundError(EntityNotFoundError):
         super().__init__("Document", doc_id)
 
 
-class DocumentPageNotFoundError(EntityNotFoundError):
+class DocumentChunkNotFoundError(EntityNotFoundError):
     def __init__(self, identifier: Any):
-        super().__init__("DocumentPage", identifier)
+        super().__init__("DocumentChunk", identifier)
 
 
 class ChatNotFoundError(EntityNotFoundError):
@@ -79,9 +79,9 @@ class DuplicateDocumentError(DuplicateEntityError):
         super().__init__("Document", field_name, value)
 
 
-class DuplicatePageError(DuplicateEntityError):
+class DuplicateChunkError(DuplicateEntityError):
     def __init__(self, field_name: str, value: Any):
-        super().__init__("DocumentPage", field_name, value)
+        super().__init__("DocumentChunk", field_name, value)
 
 
 class DuplicateChatError(DuplicateEntityError):

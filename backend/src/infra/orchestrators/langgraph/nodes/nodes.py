@@ -1,6 +1,7 @@
 """LangGraph nodes for chat orchestration: ToolNode, AgentNode, and EvaluatorNode."""
 
 from typing import Any, Optional, Sequence
+import uuid
 from pydantic import BaseModel, Field
 from langchain_core.messages import (
     HumanMessage,
@@ -9,9 +10,15 @@ from langchain_core.messages import (
     trim_messages,
 )
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END
+from langgraph.types import Send
 from langgraph.prebuilt import ToolNode as PrebuiltToolNode
 
-from src.core.prompts import AGENT_SYSTEM_PROMPT, EVALUATOR_JUDGE_PROMPT_TEMPLATE
+from src.core.prompts import (
+    AGENT_SYSTEM_PROMPT,
+    EVALUATOR_JUDGE_PROMPT_TEMPLATE,
+    IMAGE_CAPTION_PROMPT_TEMPLATE,
+)
 from src.infra.llms.base_langchain_adapter import BaseLangChainLLMAdapter
 from src.infra.orchestrators.langgraph.state import AgentState
 
@@ -68,7 +75,7 @@ class AgentNode:
         self.tools = list(tools) if tools else []
         self.system_prompt = system_prompt or AGENT_SYSTEM_PROMPT
         self.max_tokens = max_tokens
-        if self.tools and hasattr(self.llm, "bind_tools"):
+        if self.tools:
             self.model_runnable = self.llm.bind_tools(self.tools)
         else:
             self.model_runnable = self.llm
@@ -128,9 +135,7 @@ class EvaluatorNode:
 
         # Extract last assistant message
         last_msg = messages[-1]
-        candidate_answer = (
-            last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-        )
+        candidate_answer = str(last_msg.content)
 
         last_human_idx = -1
         for i in range(len(messages) - 1, -1, -1):
@@ -197,11 +202,38 @@ def should_continue(state: AgentState) -> str:
 def should_revise(state: AgentState, max_revisions: int = 2) -> str:
     """
     Conditional edge from evaluator:
-    - If approved or max revisions reached, route to 'end'.
+    - If approved or max revisions reached, route to 'decide_image_captions'.
     - If revisions are needed, route back to 'agent'.
     """
-    is_approved = state.get("is_approved", True)
-    revision_count = state.get("revision_count", 0)
-    if is_approved or revision_count >= max_revisions:
-        return "end"
+    if state.get("is_approved") or state.get("revision_count", 0) >= max_revisions:
+        return "decide_image_captions"
     return "agent"
+
+
+class CaptionDeciderNode:
+    """Decides how many attachment images need captions from state."""
+
+    async def __call__(self, state: AgentState) -> dict:
+        return {"images_to_caption": state.get("images_to_caption", [])}
+
+
+def dispatch_caption_generators(state: AgentState) -> list[Send] | str:
+    """Routes to END if no captions, otherwise fans out to caption_generator for each image."""
+    images = state.get("images_to_caption", [])
+    if not images:
+        return END
+    return [Send("caption_generator", {"media_id": str(img)}) for img in images]
+
+
+class CaptionGeneratorNode:
+    """Generates a caption for an individual image attachment."""
+
+    def __init__(self, llm: Any):
+        self.llm = _extract_model(llm)
+
+    async def __call__(self, state: dict) -> dict:
+        media_id = state["media_id"]
+        prompt = IMAGE_CAPTION_PROMPT_TEMPLATE.format(media_id=media_id)
+        response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+        caption = str(response.content)
+        return {"generated_captions": (str(media_id), caption)}

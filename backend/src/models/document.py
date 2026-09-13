@@ -8,7 +8,7 @@ from src.infra.postgres_adapter import Base
 
 if TYPE_CHECKING:
     from src.models.project import Project
-    from src.models.document_page import DocumentPage
+    from src.models.document_chunk import DocumentChunk
 
 
 class Document(Base):
@@ -62,6 +62,11 @@ class Document(Base):
         nullable=True,
         comment="Document header metadata stored as JSON",
     )
+    thumbnails: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Generated thumbnails stored as JSON",
+    )
 
     # Relationships
     # One-to-One relationship back to Project
@@ -71,10 +76,10 @@ class Document(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    pages: Mapped[list[DocumentPage]] = relationship(
-        "DocumentPage",
+    chunks: Mapped[list[DocumentChunk]] = relationship(
+        "DocumentChunk",
         back_populates="document",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

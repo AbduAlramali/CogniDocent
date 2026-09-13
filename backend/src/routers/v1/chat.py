@@ -1,0 +1,121 @@
+from typing import List, Optional
+import uuid
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
+
+from src.dependencies import get_chat_service
+from src.schemas.chat import ChatCompletionRequest, ChatResponse
+from src.schemas.media import MediaResponse
+from src.schemas.message import MessageWithAttachments
+from src.services.chat_service import ChatService
+
+router = APIRouter(prefix="/chats", tags=["Chats"])
+
+
+@router.get(
+    "",
+    response_model=List[ChatResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List Chats",
+    description="""
+    Retrieves all chat sessions associated with a specific project, ordered by creation time.
+    """,
+    responses={
+        200: {
+            "description": "Successfully retrieved list of chats for the project.",
+            "model": List[ChatResponse],
+        },
+        404: {"description": "Not Found: Project ID does not exist."},
+    },
+)
+async def list_chats(
+    project_id: uuid.UUID = Query(..., description="UUID of the project to retrieve chats for"),
+    include_archived: bool = Query(default=False, description="Include archived chats"),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> List[ChatResponse]:
+    chats = await chat_service.list_chats(project_id=project_id, include_archived=include_archived)
+    return [ChatResponse.model_validate(c) for c in chats]
+
+
+@router.delete(
+    "/{chat_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete Chat",
+    description="""
+    Permanently deletes a chat session and all its associated messages and attachment references.
+    """,
+    responses={
+        204: {"description": "Chat successfully deleted."},
+        404: {"description": "Not Found: Chat ID does not exist."},
+    },
+)
+async def delete_chat(
+    chat_id: uuid.UUID = Path(..., description="UUID of the chat session to delete"),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> None:
+    await chat_service.delete_chat(chat_id)
+
+
+@router.post(
+    "/completion",
+    response_model=MessageWithAttachments,
+    status_code=status.HTTP_200_OK,
+    summary="Chat Completion",
+    description="""
+    Creates or sends a new message to a chat and returns the assistant response with inline citations
+    and citation metadata. If chat_id is omitted from the request, a new chat session is created automatically.
+    """,
+    responses={
+        200: {
+            "description": "Assistant response successfully generated with inline citations and metadata.",
+            "model": MessageWithAttachments,
+        },
+        404: {"description": "Not Found: Chat or Project does not exist."},
+        500: {"description": "Internal Server Error: LLM or retrieval orchestration failure."},
+    },
+)
+async def chat_completion(
+    body: ChatCompletionRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+) -> MessageWithAttachments:
+    return await chat_service.chat_completion(
+        project_id=body.project_id,
+        chat_id=body.chat_id,
+        message=body.message,
+        attachment_ids=body.attachment_ids,
+    )
+
+
+@router.post(
+    "/attachments",
+    response_model=MediaResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload Chat Attachment",
+    description="""
+    Uploads an image or document attachment to the chat. Validates the SHA-256 hash against
+    the uploaded bytes, registers a media record in PROCESSING status, transfers the file
+    to quarantine storage, and fires an asynchronous event to scan and chunk the attachment.
+    Once processed, the attachment_id can be passed to chat completion.
+    """,
+    responses={
+        201: {
+            "description": "Attachment uploaded successfully and queued for processing.",
+            "model": MediaResponse,
+        },
+        400: {"description": "Bad Request: Empty file content or hash mismatch."},
+    },
+)
+async def upload_attachment(
+    file: UploadFile = File(..., description="Attachment file stream"),
+    project_id: uuid.UUID = Form(..., description="UUID of the project"),
+    file_hash: str = Form(..., description="Client-computed SHA-256 hex digest of the file"),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> MediaResponse:
+    content = await file.read()
+    media = await chat_service.upload_attachment(
+        file_stream=content,
+        filename=file.filename or "attachment",
+        content_type=file.content_type or "application/octet-stream",
+        project_id=str(project_id),
+        file_hash=file_hash,
+    )
+    return MediaResponse.model_validate(media)

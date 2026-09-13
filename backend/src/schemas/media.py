@@ -33,8 +33,13 @@ class MediaResponse(MediaBase):
     model_config = ConfigDict(from_attributes=True)
 
     media_id: uuid.UUID
-    message_id: uuid.UUID
+    message_id: Optional[uuid.UUID] = None
     file_path: str
+
     file_size_bytes: int
     file_hash: str
     uploaded_at: datetime
+    caption: Optional[str] = None
+    has_chunks: bool = False
+    thumbnails: Optional[Dict[str, Any]] = None
+

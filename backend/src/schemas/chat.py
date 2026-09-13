@@ -49,3 +49,20 @@ class ChatResponse(ChatBase):
     project_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class ChatCompletionRequest(BaseModel):
+    """
+    Request schema for chat completion. If chat_id is omitted, a new chat is automatically created.
+    """
+    project_id: uuid.UUID = Field(..., description="UUID of the project")
+    chat_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Optional UUID of an existing chat. If omitted, creates a new chat session.",
+    )
+    message: str = Field(..., min_length=1, description="Message to send to the assistant")
+    attachment_ids: List[uuid.UUID] = Field(
+        default_factory=list,
+        description="Optional list of attachment media UUIDs to include with the message",
+    )
+

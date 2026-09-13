@@ -5,21 +5,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from src.core.interfaces.ilogger import ILogger
-from src.core.interfaces.idocument_page_repository import IDocumentPageRepository
-from src.schemas.document_page import DocumentPageResponse, PageUpdateDTO
+from src.core.interfaces.idocument_chunk_repository import IDocumentChunkRepository
+from src.schemas.document_chunk import DocumentChunkResponse, ChunkUpdateDTO
 from src.core.exceptions.database import (
     RepositoryError,
-    DocumentPageNotFoundError,
-    DuplicatePageError,
+    DocumentChunkNotFoundError,
+    DuplicateChunkError,
 )
-from src.models.document_page import DocumentPage
+from src.models.document_chunk import DocumentChunk
 from src.models.project import Project
 from src.models.embedding_index_metadata import EmbeddingIndexMetadata
 
 
-class DocumentPageRepository(IDocumentPageRepository):
+class DocumentChunkRepository(IDocumentChunkRepository):
     """
-    SQLAlchemy implementation of IDocumentPageRepository (PostgreSQL Adapter).
+    SQLAlchemy implementation of IDocumentChunkRepository (PostgreSQL Adapter).
     Contains purely database access operations without business logic or orchestration.
     """
 
@@ -27,131 +27,173 @@ class DocumentPageRepository(IDocumentPageRepository):
         self.session = session
         self.logger = logger
 
-    async def get_by_id(self, page_id: uuid.UUID) -> DocumentPage | None:
+    async def get_by_id(self, chunk_id: uuid.UUID) -> DocumentChunk | None:
         try:
-            stmt = select(DocumentPage).where(DocumentPage.page_id == page_id)
+            stmt = select(DocumentChunk).where(DocumentChunk.chunk_id == chunk_id)
             result = await self.session.execute(stmt)
             return result.scalar_one_or_none()
         except SQLAlchemyError as e:
-            self.logger.error("Database error retrieving page by ID", page_id=page_id, exc_info=e)
-            raise RepositoryError(f"Failed to retrieve page: {str(e)}") from e
+            self.logger.error("Database error retrieving chunk by ID", chunk_id=chunk_id, exc_info=e)
+            raise RepositoryError(f"Failed to retrieve chunk: {str(e)}") from e
 
-    async def get_by_page_num(self, doc_id: uuid.UUID, page_num: int) -> DocumentPage | None:
+    async def get_by_chunk_index(self, doc_id: uuid.UUID, chunk_index: int) -> DocumentChunk | None:
         try:
-            stmt = select(DocumentPage).where(
-                DocumentPage.doc_id == doc_id,
-                DocumentPage.page_num == page_num,
+            stmt = select(DocumentChunk).where(
+                DocumentChunk.doc_id == doc_id,
+                DocumentChunk.chunk_index == chunk_index,
             )
             result = await self.session.execute(stmt)
             return result.scalar_one_or_none()
         except SQLAlchemyError as e:
-            self.logger.error("Database error retrieving page by page number", doc_id=doc_id, page_num=page_num, exc_info=e)
-            raise RepositoryError(f"Failed to retrieve page: {str(e)}") from e
+            self.logger.error(
+                "Database error retrieving chunk by index",
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                exc_info=e,
+            )
+            raise RepositoryError(f"Failed to retrieve chunk: {str(e)}") from e
 
-    async def list_by_document(self, doc_id: uuid.UUID) -> Sequence[DocumentPage]:
+    async def list_by_document(self, doc_id: uuid.UUID) -> Sequence[DocumentChunk]:
         try:
             stmt = (
-                select(DocumentPage)
-                .where(DocumentPage.doc_id == doc_id)
-                .order_by(DocumentPage.page_num.asc())
+                select(DocumentChunk)
+                .where(DocumentChunk.doc_id == doc_id)
+                .order_by(DocumentChunk.chunk_index.asc())
             )
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            self.logger.error("Database error listing pages for document", doc_id=doc_id, exc_info=e)
-            raise RepositoryError(f"Failed to list pages: {str(e)}") from e
+            self.logger.error("Database error listing chunks for document", doc_id=doc_id, exc_info=e)
+            raise RepositoryError(f"Failed to list chunks: {str(e)}") from e
 
-    async def get_pages_in_range(
+    async def get_chunks_in_page_range(
         self, doc_id: uuid.UUID, start_page: int, end_page: int
-    ) -> Sequence[DocumentPage]:
+    ) -> Sequence[DocumentChunk]:
         try:
             stmt = (
-                select(DocumentPage)
+                select(DocumentChunk)
                 .where(
-                    DocumentPage.doc_id == doc_id,
-                    DocumentPage.page_num >= start_page,
-                    DocumentPage.page_num <= end_page,
+                    DocumentChunk.doc_id == doc_id,
+                    DocumentChunk.page_num >= start_page,
+                    DocumentChunk.page_num <= end_page,
                 )
-                .order_by(DocumentPage.page_num.asc())
+                .order_by(DocumentChunk.chunk_index.asc())
             )
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
             self.logger.error(
-                "Database error retrieving pages in range",
+                "Database error retrieving chunks in page range",
                 doc_id=doc_id,
                 start_page=start_page,
                 end_page=end_page,
                 exc_info=e,
             )
-            raise RepositoryError(f"Failed to retrieve pages in range: {str(e)}") from e
+            raise RepositoryError(f"Failed to retrieve chunks in page range: {str(e)}") from e
 
-    async def create(self, page: DocumentPage) -> DocumentPage:
+    async def get_chunks_in_context_window(
+        self, doc_id: uuid.UUID, target_chunk_index: int, radius: int = 2
+    ) -> Sequence[DocumentChunk]:
         try:
-            self.session.add(page)
+            min_index = max(0, target_chunk_index - radius)
+            max_index = target_chunk_index + radius
+            stmt = (
+                select(DocumentChunk)
+                .where(
+                    DocumentChunk.doc_id == doc_id,
+                    DocumentChunk.chunk_index >= min_index,
+                    DocumentChunk.chunk_index <= max_index,
+                )
+                .order_by(DocumentChunk.chunk_index.asc())
+            )
+            result = await self.session.execute(stmt)
+            return result.scalars().all()
+        except SQLAlchemyError as e:
+            self.logger.error(
+                "Database error expanding chunk context",
+                doc_id=doc_id,
+                target_chunk_index=target_chunk_index,
+                radius=radius,
+                exc_info=e,
+            )
+            raise RepositoryError(f"Failed to expand chunk context: {str(e)}") from e
+
+    async def create(self, chunk: DocumentChunk) -> DocumentChunk:
+        try:
+            self.session.add(chunk)
             await self.session.commit()
-            await self.session.refresh(page)
-            return page
+            await self.session.refresh(chunk)
+            return chunk
         except IntegrityError as e:
             await self.session.rollback()
-            self.logger.warning("DocumentPage integrity violation on create", doc_id=page.doc_id, page_num=page.page_num, exc_info=e)
-            raise DuplicatePageError("doc_id and page_num combo", f"doc_id={page.doc_id}, page_num={page.page_num}") from e
+            self.logger.warning(
+                "DocumentChunk integrity violation on create",
+                doc_id=chunk.doc_id,
+                chunk_index=chunk.chunk_index,
+                exc_info=e,
+            )
+            raise DuplicateChunkError("doc_id and chunk_index combo", f"doc_id={chunk.doc_id}, chunk_index={chunk.chunk_index}") from e
         except SQLAlchemyError as e:
             await self.session.rollback()
-            self.logger.error("Database error creating document page", doc_id=page.doc_id, page_num=page.page_num, exc_info=e)
-            raise RepositoryError(f"Failed to create page: {str(e)}") from e
+            self.logger.error(
+                "Database error creating document chunk",
+                doc_id=chunk.doc_id,
+                chunk_index=chunk.chunk_index,
+                exc_info=e,
+            )
+            raise RepositoryError(f"Failed to create chunk: {str(e)}") from e
 
-    async def bulk_create(self, pages: Sequence[DocumentPage]) -> Sequence[DocumentPage]:
+    async def bulk_create(self, chunks: Sequence[DocumentChunk]) -> Sequence[DocumentChunk]:
         try:
-            self.session.add_all(pages)
+            self.session.add_all(chunks)
             await self.session.commit()
-            return pages
+            return chunks
         except IntegrityError as e:
             await self.session.rollback()
-            self.logger.warning("DocumentPage integrity violation on bulk_create", exc_info=e)
-            raise DuplicatePageError("pages", "Duplicate page entries detected") from e
+            self.logger.warning("DocumentChunk integrity violation on bulk_create", exc_info=e)
+            raise DuplicateChunkError("chunks", "Duplicate chunk entries detected") from e
         except SQLAlchemyError as e:
             await self.session.rollback()
-            self.logger.error("Database error bulk creating document pages", count=len(pages), exc_info=e)
-            raise RepositoryError(f"Failed to bulk create pages: {str(e)}") from e
+            self.logger.error("Database error bulk creating document chunks", count=len(chunks), exc_info=e)
+            raise RepositoryError(f"Failed to bulk create chunks: {str(e)}") from e
 
-    async def update(self, page_id: uuid.UUID, **kwargs) -> DocumentPage:
+    async def update(self, chunk_id: uuid.UUID, **kwargs) -> DocumentChunk:
         try:
-            page = await self.get_by_id(page_id)
-            if not page:
-                raise DocumentPageNotFoundError(page_id)
+            chunk = await self.get_by_id(chunk_id)
+            if not chunk:
+                raise DocumentChunkNotFoundError(chunk_id)
 
             for key, value in kwargs.items():
-                if hasattr(page, key):
-                    setattr(page, key, value)
+                if hasattr(chunk, key):
+                    setattr(chunk, key, value)
 
             await self.session.commit()
-            await self.session.refresh(page)
-            return page
-        except DocumentPageNotFoundError:
+            await self.session.refresh(chunk)
+            return chunk
+        except DocumentChunkNotFoundError:
             raise
         except IntegrityError as e:
             await self.session.rollback()
-            self.logger.warning("DocumentPage integrity violation on update", page_id=page_id, exc_info=e)
-            raise DuplicatePageError("fields", str(kwargs)) from e
+            self.logger.warning("DocumentChunk integrity violation on update", chunk_id=chunk_id, exc_info=e)
+            raise DuplicateChunkError("fields", str(kwargs)) from e
         except SQLAlchemyError as e:
             await self.session.rollback()
-            self.logger.error("Database error updating page", page_id=page_id, exc_info=e)
-            raise RepositoryError(f"Failed to update page: {str(e)}") from e
+            self.logger.error("Database error updating chunk", chunk_id=chunk_id, exc_info=e)
+            raise RepositoryError(f"Failed to update chunk: {str(e)}") from e
 
-    async def delete(self, page_id: uuid.UUID) -> bool:
+    async def delete(self, chunk_id: uuid.UUID) -> bool:
         try:
-            page = await self.get_by_id(page_id)
-            if not page:
+            chunk = await self.get_by_id(chunk_id)
+            if not chunk:
                 return False
 
-            await self.session.delete(page)
+            await self.session.delete(chunk)
             await self.session.commit()
             return True
         except SQLAlchemyError as e:
             await self.session.rollback()
-            self.logger.error("Database error deleting page", page_id=page_id, exc_info=e)
-            raise RepositoryError(f"Failed to delete page: {str(e)}") from e
+            self.logger.error("Database error deleting chunk", chunk_id=chunk_id, exc_info=e)
+            raise RepositoryError(f"Failed to delete chunk: {str(e)}") from e
 
     async def get_embedding_metadata(self, project_id: uuid.UUID) -> Optional[Tuple[str, int]]:
         try:
@@ -197,31 +239,31 @@ class DocumentPageRepository(IDocumentPageRepository):
         try:
             # 1. Drop existing HNSW indexes
             await self.session.execute(
-                text("DROP INDEX IF EXISTS idx_document_pages_content_vector;")
+                text("DROP INDEX IF EXISTS idx_document_chunks_content_vector;")
             )
             await self.session.execute(
-                text("DROP INDEX IF EXISTS idx_document_pages_deep_content_vector;")
+                text("DROP INDEX IF EXISTS idx_document_chunks_deep_content_vector;")
             )
             # 2. Alter column types to new vector dimensions with USING NULL
             await self.session.execute(
                 text(
-                    f"ALTER TABLE document_pages ALTER COLUMN content_vector TYPE vector({new_dimensions}) USING NULL;"
+                    f"ALTER TABLE document_chunks ALTER COLUMN content_vector TYPE vector({new_dimensions}) USING NULL;"
                 )
             )
             await self.session.execute(
                 text(
-                    f"ALTER TABLE document_pages ALTER COLUMN deep_content_vector TYPE vector({new_dimensions}) USING NULL;"
+                    f"ALTER TABLE document_chunks ALTER COLUMN deep_content_vector TYPE vector({new_dimensions}) USING NULL;"
                 )
             )
             # 3. Recreate HNSW indexes for cosine distance
             await self.session.execute(
                 text(
-                    "CREATE INDEX idx_document_pages_content_vector ON document_pages USING hnsw (content_vector vector_cosine_ops);"
+                    "CREATE INDEX idx_document_chunks_content_vector ON document_chunks USING hnsw (content_vector vector_cosine_ops);"
                 )
             )
             await self.session.execute(
                 text(
-                    "CREATE INDEX idx_document_pages_deep_content_vector ON document_pages USING hnsw (deep_content_vector vector_cosine_ops);"
+                    "CREATE INDEX idx_document_chunks_deep_content_vector ON document_chunks USING hnsw (deep_content_vector vector_cosine_ops);"
                 )
             )
             await self.session.commit()
@@ -234,8 +276,8 @@ class DocumentPageRepository(IDocumentPageRepository):
         try:
             doc_subquery = select(Project.doc_id).where(Project.project_id == project_id).scalar_subquery()
             await self.session.execute(
-                update(DocumentPage)
-                .where(DocumentPage.doc_id == doc_subquery)
+                update(DocumentChunk)
+                .where(DocumentChunk.doc_id == doc_subquery)
                 .values(content_vector=None, deep_content_vector=None)
             )
             await self.session.commit()
@@ -246,11 +288,11 @@ class DocumentPageRepository(IDocumentPageRepository):
 
     async def count_populated_embeddings(self, doc_id: uuid.UUID) -> int:
         try:
-            stmt = select(func.count(DocumentPage.page_id)).where(
-                DocumentPage.doc_id == doc_id,
+            stmt = select(func.count(DocumentChunk.chunk_id)).where(
+                DocumentChunk.doc_id == doc_id,
                 or_(
-                    DocumentPage.content_vector.isnot(None),
-                    DocumentPage.deep_content_vector.isnot(None),
+                    DocumentChunk.content_vector.isnot(None),
+                    DocumentChunk.deep_content_vector.isnot(None),
                 ),
             )
             result = await self.session.execute(stmt)
@@ -259,21 +301,21 @@ class DocumentPageRepository(IDocumentPageRepository):
             self.logger.error("Database error counting populated embeddings", doc_id=doc_id, exc_info=e)
             raise RepositoryError(f"Failed to count populated embeddings: {str(e)}") from e
 
-    async def search_pages_vector(
+    async def search_chunks_vector(
         self, doc_id: uuid.UUID, query_vector: List[float], limit: int = 3
-    ) -> Sequence[DocumentPage]:
+    ) -> Sequence[DocumentChunk]:
         try:
             effective_vector = case(
-                (DocumentPage.deep_content_vector.isnot(None), DocumentPage.deep_content_vector),
-                else_=DocumentPage.content_vector,
+                (DocumentChunk.deep_content_vector.isnot(None), DocumentChunk.deep_content_vector),
+                else_=DocumentChunk.content_vector,
             )
             stmt = (
-                select(DocumentPage)
+                select(DocumentChunk)
                 .where(
-                    DocumentPage.doc_id == doc_id,
+                    DocumentChunk.doc_id == doc_id,
                     or_(
-                        DocumentPage.deep_content_vector.isnot(None),
-                        DocumentPage.content_vector.isnot(None),
+                        DocumentChunk.deep_content_vector.isnot(None),
+                        DocumentChunk.content_vector.isnot(None),
                     ),
                 )
                 .order_by(effective_vector.cosine_distance(query_vector))
@@ -285,47 +327,47 @@ class DocumentPageRepository(IDocumentPageRepository):
             self.logger.error("Database error during unified vector search", doc_id=doc_id, exc_info=e)
             raise RepositoryError(f"Vector search failed: {str(e)}") from e
 
-    async def get_fallback_pages(
+    async def get_fallback_chunks(
         self, doc_id: uuid.UUID, limit: int = 3
-    ) -> Sequence[DocumentPage]:
+    ) -> Sequence[DocumentChunk]:
         try:
             stmt = (
-                select(DocumentPage)
-                .where(DocumentPage.doc_id == doc_id)
-                .order_by(DocumentPage.page_num.asc())
+                select(DocumentChunk)
+                .where(DocumentChunk.doc_id == doc_id)
+                .order_by(DocumentChunk.chunk_index.asc())
                 .limit(limit)
             )
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            self.logger.error("Database error fetching fallback pages", doc_id=doc_id, exc_info=e)
+            self.logger.error("Database error fetching fallback chunks", doc_id=doc_id, exc_info=e)
             raise RepositoryError(f"Fallback fetch failed: {str(e)}") from e
 
-    async def get_pages_missing_embeddings(
+    async def get_chunks_missing_embeddings(
         self,
         project_id: uuid.UUID,
         batch_size: int = 100,
-    ) -> List[DocumentPageResponse]:
+    ) -> List[DocumentChunkResponse]:
         try:
             stmt = (
-                select(DocumentPage)
-                .join(Project, Project.doc_id == DocumentPage.doc_id)
+                select(DocumentChunk)
+                .join(Project, Project.doc_id == DocumentChunk.doc_id)
                 .where(
                     Project.project_id == project_id,
-                    DocumentPage.content_vector.is_(None),
+                    DocumentChunk.content_vector.is_(None),
                 )
-                .order_by(DocumentPage.page_num.asc())
+                .order_by(DocumentChunk.chunk_index.asc())
                 .limit(batch_size)
             )
             result = await self.session.execute(stmt)
-            pages = result.scalars().all()
-            return [DocumentPageResponse.model_validate(p) for p in pages]
+            chunks = result.scalars().all()
+            return [DocumentChunkResponse.model_validate(c) for c in chunks]
         except SQLAlchemyError as e:
-            self.logger.error("Database error fetching pages missing embeddings", project_id=project_id, exc_info=e)
-            raise RepositoryError(f"Failed to fetch pages missing embeddings: {str(e)}") from e
+            self.logger.error("Database error fetching chunks missing embeddings", project_id=project_id, exc_info=e)
+            raise RepositoryError(f"Failed to fetch chunks missing embeddings: {str(e)}") from e
 
-    async def update_pages(
-        self, updates: Sequence[PageUpdateDTO]
+    async def update_chunks(
+        self, updates: Sequence[ChunkUpdateDTO]
     ) -> None:
         if not updates:
             return
@@ -343,12 +385,12 @@ class DocumentPageRepository(IDocumentPageRepository):
 
                 if values:
                     await self.session.execute(
-                        update(DocumentPage)
-                        .where(DocumentPage.page_id == item.page_id)
+                        update(DocumentChunk)
+                        .where(DocumentChunk.chunk_id == item.chunk_id)
                         .values(**values)
                     )
             await self.session.commit()
         except SQLAlchemyError as e:
             await self.session.rollback()
-            self.logger.error("Database error updating pages", count=len(updates), exc_info=e)
-            raise RepositoryError(f"Failed to update pages: {str(e)}") from e
+            self.logger.error("Database error updating chunks", count=len(updates), exc_info=e)
+            raise RepositoryError(f"Failed to update chunks: {str(e)}") from e

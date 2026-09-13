@@ -1,27 +1,28 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
-from src.core.enums import Role
+from src.core.enums import Role, ThinkingLevel
 import uuid
 from src.schemas.media import MediaResponse
 
 
-class CitationItem(BaseModel):
-    page_num: int
-    snippet: str
-    score: Optional[float] = None
+class CitationMetadataResponse(BaseModel):
+    ref_id: str
+    page: int
+    bbox: list[float]
+    source_name: str
 
 
 class MessageBase(BaseModel):
     role: Role
     content: str
-    citations: Optional[List[CitationItem]] = None
+    citations: Optional[list[CitationMetadataResponse]] = None
 
 
 class MessageCreate(MessageBase):
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
-    thinking_mode: Optional[str] = None
+    thinking_mode: Optional[ThinkingLevel] = None
     token_count: Optional[int] = None
     latency_ms: Optional[int] = None
 
@@ -37,9 +38,14 @@ class MessageResponse(MessageBase):
 
     message_id: uuid.UUID
     chat_id: uuid.UUID
-    media: Optional[List[MediaResponse]] = None
     created_at: datetime
     token_count: Optional[int] = None
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
-    thinking_mode: Optional[str] = None
+    thinking_mode: Optional[ThinkingLevel] = None
+
+
+class MessageWithAttachments(MessageResponse):
+    image_attachments: List[MediaResponse] = Field(default_factory=list)
+    doc_attachments: List[MediaResponse] = Field(default_factory=list)
+

@@ -4,8 +4,11 @@ from .nodes import (
     EvaluatorNode,
     EvaluationResult,
     FeedbackMessage,
+    CaptionDeciderNode,
+    CaptionGeneratorNode,
     should_continue,
     should_revise,
+    dispatch_caption_generators,
 )
 
 __all__ = [
@@ -14,6 +17,9 @@ __all__ = [
     "EvaluatorNode",
     "EvaluationResult",
     "FeedbackMessage",
+    "CaptionDeciderNode",
+    "CaptionGeneratorNode",
     "should_continue",
     "should_revise",
+    "dispatch_caption_generators",
 ]
