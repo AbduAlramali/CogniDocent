@@ -67,6 +67,29 @@ async def list_projects(
     return await project_service.list_projects()
 
 
+@router.get(
+    "/{project_id}",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Project",
+    description="""
+    Retrieves a specific project by UUID, including document metadata and thumbnail keys.
+    """,
+    responses={
+        200: {
+            "description": "Successfully retrieved project details.",
+            "model": ProjectResponse,
+        },
+        404: {"description": "Not Found: Project ID does not exist."},
+    },
+)
+async def get_project(
+    project_id: uuid.UUID = Path(..., description="UUID of the project to retrieve"),
+    project_service: ProjectService = Depends(get_project_service),
+) -> ProjectResponse:
+    return await project_service.get_project(project_id)
+
+
 @router.delete(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,

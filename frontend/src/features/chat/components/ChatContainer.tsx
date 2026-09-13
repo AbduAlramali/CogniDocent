@@ -1,94 +1,187 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceStore } from "@/shared/store/useWorkspaceStore";
-import { MessageFeed } from "./MessageFeed";
-import { useStreamingChat } from "../hooks/useStreamingChat";
+import { chatsApi, providersApi } from "@/api";
+import { MessageWithAttachments } from "@/types";
+import { ChatHeader } from "./ChatHeader";
+import { MessageItem } from "./MessageItem";
+import { ChatInputBar } from "./ChatInputBar";
+import { Bot, Loader2, Sparkles } from "lucide-react";
 
 export const ChatContainer: React.FC = () => {
-  const chatScope = useWorkspaceStore((state) => state.chatScope);
-  const setChatScope = useWorkspaceStore((state) => state.setChatScope);
-  const currentProvider = useWorkspaceStore((state) => state.currentProvider);
-  const setCurrentProvider = useWorkspaceStore((state) => state.setCurrentProvider);
-  const currentModel = useWorkspaceStore((state) => state.currentModel);
-  const setCurrentModel = useWorkspaceStore((state) => state.setCurrentModel);
+  const queryClient = useQueryClient();
+  const activeProjectId = useWorkspaceStore((state) => state.activeProjectId);
+  const activeChatId = useWorkspaceStore((state) => state.activeChatId);
+  const setActiveChatId = useWorkspaceStore((state) => state.setActiveChatId);
+  const jumpToPage = useWorkspaceStore((state) => state.jumpToPage);
 
-  const { messages, sendMessage, isStreaming } = useStreamingChat();
-  const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [localMessages, setLocalMessages] = useState<MessageWithAttachments[]>([]);
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isStreaming) return;
-    sendMessage(input);
-    setInput("");
+  // 1. Fetch chat sessions for current project
+  const { data: chats = [] } = useQuery({
+    queryKey: ["chats", activeProjectId],
+    queryFn: () => (activeProjectId ? chatsApi.listChats(activeProjectId) : []),
+    enabled: !!activeProjectId,
+  });
+
+  // 2. Fetch supported AI providers and models
+  const { data: providersData } = useQuery({
+    queryKey: ["providers-models"],
+    queryFn: () => providersApi.listProvidersModels(),
+    staleTime: 1000 * 60 * 10, // 10 minutes cache
+  });
+
+  // 3. Fetch messages for active chat session
+  const { data: serverMessages = [] } = useQuery({
+    queryKey: ["messages", activeChatId],
+    queryFn: () => (activeChatId ? chatsApi.listMessages(activeChatId) : []),
+    enabled: !!activeChatId,
+  });
+
+  // Synchronize server messages to local messages when chat session changes
+  useEffect(() => {
+    if (activeChatId) {
+      setLocalMessages(serverMessages);
+    } else {
+      setLocalMessages([]);
+    }
+  }, [activeChatId, serverMessages]);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [localMessages]);
+
+  // 4. Send Completion Mutation
+  const sendMutation = useMutation({
+    mutationFn: (payload: { message: string; attachmentIds: string[] }) => {
+      if (!activeProjectId) throw new Error("No active project");
+      return chatsApi.sendCompletion({
+        project_id: activeProjectId,
+        chat_id: activeChatId,
+        message: payload.message,
+        attachment_ids: payload.attachmentIds,
+      });
+    },
+    onSuccess: (assistantMessage) => {
+      // If a new chat session was generated automatically, set it as active
+      if (!activeChatId && assistantMessage.chat_id) {
+        setActiveChatId(assistantMessage.chat_id);
+      }
+      setLocalMessages((prev) => [...prev, assistantMessage]);
+      queryClient.invalidateQueries({ queryKey: ["chats", activeProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["messages", assistantMessage.chat_id] });
+    },
+    onError: (err: any) => {
+      // Append an assistant error notification
+      const errorMsg: MessageWithAttachments = {
+        message_id: crypto.randomUUID(),
+        chat_id: activeChatId || "error",
+        role: "assistant",
+        content: `**Error**: ${err.message || "Failed to generate completion."}`,
+        created_at: new Date().toISOString(),
+      };
+      setLocalMessages((prev) => [...prev, errorMsg]);
+    },
+  });
+
+  const handleSendMessage = async (text: string, attachmentIds: string[]) => {
+    // 1. Optimistically append user message
+    const optimisticUserMsg: MessageWithAttachments = {
+      message_id: crypto.randomUUID(),
+      chat_id: activeChatId || "pending",
+      role: "user",
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    setLocalMessages((prev) => [...prev, optimisticUserMsg]);
+
+    // 2. Trigger API completion
+    await sendMutation.mutateAsync({ message: text, attachmentIds });
   };
 
+  const handleNewChat = () => {
+    setActiveChatId(null);
+    setLocalMessages([]);
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    try {
+      await chatsApi.deleteChat(chatId);
+      queryClient.invalidateQueries({ queryKey: ["chats", activeProjectId] });
+      if (activeChatId === chatId) {
+        handleNewChat();
+      }
+    } catch (err) {
+      console.error("Failed to delete chat:", err);
+    }
+  };
+
+  if (!activeProjectId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-muted-foreground">
+        <Bot className="w-12 h-12 text-primary/40 mb-3" />
+        <p className="text-sm">Select a project to begin chatting with documents.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full bg-background text-foreground">
-      {/* Top Header Panel controls */}
-      <div className="flex items-center justify-between p-4 border-b border-border bg-card">
-        <div className="flex space-x-2">
-          <select 
-            value={currentProvider} 
-            onChange={(e) => setCurrentProvider(e.target.value)}
-            className="border border-border rounded p-1 text-sm bg-background text-foreground focus:outline-none"
-          >
-            <option value="OLLAMA">Ollama</option>
-            <option value="GEMINI">Gemini</option>
-            <option value="OPENAI">OpenAI</option>
-          </select>
-          <select 
-            value={currentModel} 
-            onChange={(e) => setCurrentModel(e.target.value)}
-            className="border border-border rounded p-1 text-sm bg-background text-foreground focus:outline-none"
-          >
-            <option value="llama3">Llama 3</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-            <option value="gpt-4o">GPT-4o</option>
-          </select>
-        </div>
+    <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
+      {/* Top Header Controls: Chat Selector, Provider & Model dropdowns */}
+      <ChatHeader
+        chats={chats}
+        providersData={providersData}
+        onNewChat={handleNewChat}
+        onDeleteChat={handleDeleteChat}
+      />
 
-        <div className="flex bg-muted rounded p-0.5 text-xs">
-          <button 
-            type="button"
-            onClick={() => setChatScope("entire_document")}
-            className={`px-3 py-1 rounded transition-all ${chatScope === "entire_document" ? "bg-card text-foreground shadow-sm" : "text-muted"}`}
-          >
-            Document
-          </button>
-          <button 
-            type="button"
-            onClick={() => setChatScope("current_page")}
-            className={`px-3 py-1 rounded transition-all ${chatScope === "current_page" ? "bg-card text-foreground shadow-sm" : "text-muted"}`}
-          >
-            Page Only
-          </button>
-        </div>
-      </div>
+      {/* Main Messages Feed */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {localMessages.length === 0 && !sendMutation.isPending && (
+          <div className="py-20 text-center text-muted-foreground max-w-sm mx-auto flex flex-col items-center">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-foreground">AI Research Assistant</h4>
+            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              Ask questions about the document, snip charts from the PDF on the left, or highlight text to quote and verify claims.
+            </p>
+          </div>
+        )}
 
-      {/* Message feed stream */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <MessageFeed messages={messages} />
-      </div>
-
-      {/* Message inputs box */}
-      <form onSubmit={handleSend} className="p-4 border-t border-border bg-card">
-        <div className="flex space-x-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={`Ask a question... (${chatScope === "current_page" ? "current page" : "entire document"})`}
-            className="flex-1 border border-border rounded-lg px-4 py-2 bg-background text-foreground focus:outline-none focus:border-primary"
-            disabled={isStreaming}
+        {/* Message Feed */}
+        {localMessages.map((msg) => (
+          <MessageItem
+            key={msg.message_id}
+            message={msg}
+            onCitationClick={(page) => jumpToPage(page)}
           />
-          <button
-            type="submit"
-            disabled={isStreaming}
-            className="bg-primary text-primary-foreground font-medium px-6 py-2 rounded-lg hover:bg-primary/95 disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
-      </form>
+        ))}
+
+        {/* Streaming / Generating Indicator */}
+        {sendMutation.isPending && (
+          <div className="flex gap-3 my-4 items-center animate-in fade-in">
+            <div className="w-8 h-8 rounded-xl bg-muted text-primary border border-border flex items-center justify-center shrink-0">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-card border border-border text-xs text-muted-foreground shadow-xs">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+              <span>Analyzing document and generating response...</span>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Bottom Composer Bar */}
+      <ChatInputBar
+        projectId={activeProjectId}
+        onSendMessage={handleSendMessage}
+        isSending={sendMutation.isPending}
+      />
     </div>
   );
 };

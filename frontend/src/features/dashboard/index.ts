@@ -1,3 +1,3 @@
-export * from "./components/DragDropZone";
-export * from "./components/DocumentGrid";
-export * from "./hooks/useUploadDocument";
+export * from "./components/ProjectCard";
+export * from "./components/ProjectGrid";
+export * from "./components/CreateProjectModal";

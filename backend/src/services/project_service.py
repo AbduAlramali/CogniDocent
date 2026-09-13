@@ -163,6 +163,26 @@ class ProjectService:
             )
         return responses
 
+    async def get_project(self, project_id: uuid.UUID) -> ProjectResponse:
+        """
+        Retrieves a single project by ID with its associated document thumbnails.
+        """
+        project = await self.project_repo.get_by_id(project_id)
+        if not project:
+            raise ProjectNotFoundError(project_id)
+        doc = await self.doc_repo.get_by_id(project.doc_id)
+        thumbnails = doc.thumbnails if doc else None
+        return ProjectResponse(
+            project_id=project.project_id,
+            doc_id=project.doc_id,
+            title=project.title,
+            description=project.description,
+            is_archived=project.is_archived,
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+            thumbnails=thumbnails,
+        )
+
     async def delete_project(self, project_id: uuid.UUID) -> bool:
         """
         Deletes a project by ID.

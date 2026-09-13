@@ -1,59 +1,118 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useRef } from "react";
+import { Document, Page } from "react-pdf";
+import "../pdfConfig";
+import "react-pdf/dist/esm/Page/TextLayer.css";
+import "react-pdf/dist/esm/Page/AnnotationLayer.css";
+
 import { useWorkspaceStore } from "@/shared/store/useWorkspaceStore";
-import { Toolbar } from "./Toolbar";
+import { PdfToolbar } from "./PdfToolbar";
+import { SnippingCanvas } from "./SnippingCanvas";
+import { TextSelectionPopup } from "./TextSelectionPopup";
+import { PageDescriptionPanel } from "./PageDescriptionPanel";
+import { CitationOverlay } from "./CitationOverlay";
+import { Loader2, FileX } from "lucide-react";
 
 interface DocumentViewerProps {
   documentUrl: string;
+  docId: string;
 }
 
-export const DocumentViewer: React.FC<DocumentViewerProps> = ({ documentUrl }) => {
+export const DocumentViewer: React.FC<DocumentViewerProps> = ({
+  documentUrl,
+  docId,
+}) => {
   const activePage = useWorkspaceStore((state) => state.activePage);
   const totalPages = useWorkspaceStore((state) => state.totalPages);
   const setTotalPages = useWorkspaceStore((state) => state.setTotalPages);
-  const setActivePage = useWorkspaceStore((state) => state.setActivePage);
-  const [scale, setScale] = useState(1.0);
+  const scale = useWorkspaceStore((state) => state.scale);
 
-  useEffect(() => {
-    // Simulation placeholder: sets total pages of active document
-    setTotalPages(40);
-  }, [documentUrl, setTotalPages]);
+  const [rotation, setRotation] = useState(0);
+  const [isDescriptionOpen, setIsDescriptionOpen] = useState(false);
+  const [pageSize, setPageSize] = useState({ width: 612, height: 792 });
 
-  const handleNextPage = () => {
-    if (activePage < totalPages) {
-      setActivePage(activePage + 1);
-    }
+  const pageContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    setTotalPages(numPages);
   };
 
-  const handlePrevPage = () => {
-    if (activePage > 1) {
-      setActivePage(activePage - 1);
-    }
+  const handlePageLoadSuccess = (page: any) => {
+    setPageSize({
+      width: page.width * scale,
+      height: page.height * scale,
+    });
+  };
+
+  const handleRotate = () => {
+    setRotation((prev) => (prev + 90) % 360);
   };
 
   return (
-    <div className="flex flex-col h-full bg-muted border-r border-border">
-      <Toolbar
-        scale={scale}
-        setScale={setScale}
-        onNextPage={handleNextPage}
-        onPrevPage={handlePrevPage}
+    <div className="flex flex-col h-full bg-muted/40 border-r border-border overflow-hidden">
+      {/* Top Controls Toolbar */}
+      <PdfToolbar
+        rotation={rotation}
+        onRotate={handleRotate}
+        isDescriptionOpen={isDescriptionOpen}
+        onToggleDescription={() => setIsDescriptionOpen((prev) => !prev)}
       />
+
+      {/* Main PDF Scroll Viewport */}
       <div className="flex-1 overflow-auto p-6 flex justify-center items-start">
-        {/* Render Page Container */}
-        <div 
-          className="bg-card text-card-foreground shadow-lg border border-border flex flex-col items-center justify-center transition-transform origin-top select-text"
-          style={{ 
-            width: `${612 * scale}px`, 
-            height: `${792 * scale}px`,
-          }}
+        <div
+          ref={pageContainerRef}
+          className="relative bg-card shadow-2xl rounded-lg border border-border transition-all duration-150 select-text"
         >
-          <div className="text-center p-8 select-none">
-            <h4 className="font-semibold text-lg mb-2">PDF Document Viewer</h4>
-            <p className="text-sm text-muted">Page {activePage} of {totalPages}</p>
-            <p className="text-xs text-muted/60 mt-4">Loaded Document: {documentUrl}</p>
-          </div>
+          <Document
+            file={documentUrl}
+            onLoadSuccess={handleDocumentLoadSuccess}
+            loading={
+              <div className="flex flex-col items-center justify-center p-20 gap-3 text-muted-foreground">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="text-xs font-medium">Loading PDF document...</span>
+              </div>
+            }
+            error={
+              <div className="flex flex-col items-center justify-center p-16 gap-3 text-destructive">
+                <FileX className="w-10 h-10" />
+                <span className="text-sm font-semibold">Failed to load PDF</span>
+                <span className="text-xs text-muted-foreground">
+                  Check if document exists or try re-uploading.
+                </span>
+              </div>
+            }
+          >
+            <Page
+              pageNumber={Math.min(Math.max(1, activePage), totalPages)}
+              scale={scale}
+              rotate={rotation}
+              onLoadSuccess={handlePageLoadSuccess}
+              renderTextLayer={true}
+              renderAnnotationLayer={false}
+              className="rounded-lg overflow-hidden"
+            />
+          </Document>
+
+          {/* Screenshot Snipping Marquee Canvas */}
+          <SnippingCanvas pageContainerRef={pageContainerRef} />
+
+          {/* Text Selection Floating Popup */}
+          <TextSelectionPopup containerRef={pageContainerRef} />
+
+          {/* Interactive Bounding Box Highlight from Citations */}
+          <CitationOverlay
+            pageWidth={pageSize.width}
+            pageHeight={pageSize.height}
+          />
         </div>
       </div>
+
+      {/* Bottom Collapsible Page AI Description Drawer */}
+      <PageDescriptionPanel
+        isOpen={isDescriptionOpen}
+        onClose={() => setIsDescriptionOpen(false)}
+        docId={docId}
+      />
     </div>
   );
 };
