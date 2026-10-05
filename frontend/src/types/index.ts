@@ -38,11 +38,24 @@ export interface CitationMetadata {
 
 export interface MediaItem {
   media_id: string;
-  file_name: string;
+  file_name?: string;
+  filename?: string;
   content_type: string;
   file_size_bytes?: number;
   status: string;
   created_at?: string;
+  thumbnails?: Record<string, string> | null;
+  error?: string;
+}
+
+export interface ChatErrorInfo {
+  title: string;
+  message: string;
+  category: string;
+  statusCode?: number;
+  suggestion?: string;
+  command?: string | null;
+  canRetry?: boolean;
 }
 
 export interface MessageWithAttachments {
@@ -58,6 +71,8 @@ export interface MessageWithAttachments {
   thinking_mode?: string | null;
   image_attachments?: MediaItem[];
   doc_attachments?: MediaItem[];
+  is_error?: boolean;
+  error_info?: ChatErrorInfo;
 }
 
 export interface ChatSession {

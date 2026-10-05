@@ -5,3 +5,5 @@ export * from "./components/MarkdownRenderer";
 export * from "./components/CitationPill";
 export * from "./components/AttachmentTray";
 export * from "./components/ChatInputBar";
+export * from "./components/ChatErrorBox";
+export * from "./components/FileTypeIcon";

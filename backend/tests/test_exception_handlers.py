@@ -7,8 +7,14 @@ from starlette.testclient import TestClient
 from src.core.exceptions.chat_exceptions import EmptyFileContentError
 from src.core.exceptions.chat_orchestrator_exceptions import OrchestrationTimeoutError
 from src.core.exceptions.database import DuplicateProjectError, ProjectNotFoundError, RepositoryError
+from src.core.exceptions.encryption_exceptions import EncryptionError
 from src.core.exceptions.fast_parser_exceptions import DocumentCorruptedError, ParserResourceLimitError
-from src.core.exceptions.llm_provider_exceptions import LLMAuthenticationError, LLMRateLimitError
+from src.core.exceptions.keystore_exceptions import KeyStoreError
+from src.core.exceptions.llm_provider_exceptions import (
+    LLMAuthenticationError,
+    LLMRateLimitError,
+    LocalModelNotFoundError,
+)
 from src.core.exceptions.tts_exceptions import TTSVoiceNotFoundError
 from src.core.interfaces.ilogger import ILogger
 from src.exception_handlers import register_exception_handlers
@@ -63,6 +69,18 @@ def app_with_handlers():
     @app.get("/test-repository-error")
     def route_repository_error():
         raise RepositoryError("Connection pool exhausted")
+
+    @app.get("/test-local-model-not-found")
+    def route_local_model_not_found():
+        raise LocalModelNotFoundError("llama3.2")
+
+    @app.get("/test-keystore-error")
+    def route_keystore_error():
+        raise KeyStoreError("Failed to access system vault")
+
+    @app.get("/test-encryption-error")
+    def route_encryption_error():
+        raise EncryptionError("Decryption token mismatch")
 
     @app.get("/test-unexpected-crash")
     def route_unexpected_crash():
@@ -170,3 +188,31 @@ def test_global_exception_handler_catches_all_and_prevents_crash(app_with_handle
     assert response.status_code == 500
     assert response.json()["message"] == "An unexpected internal server error occurred."
     mock_logger.error.assert_called_once()
+
+
+def test_local_model_not_found_handled(app_with_handlers):
+    app, mock_logger = app_with_handlers
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/test-local-model-not-found")
+    assert response.status_code == 404
+    assert "llama3.2" in response.json()["message"]
+    mock_logger.warning.assert_called_once()
+
+
+def test_keystore_error_handled(app_with_handlers):
+    app, mock_logger = app_with_handlers
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/test-keystore-error")
+    assert response.status_code == 500
+    assert response.json()["message"] == "A key store error occurred."
+    mock_logger.error.assert_called_once()
+
+
+def test_encryption_error_handled(app_with_handlers):
+    app, mock_logger = app_with_handlers
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/test-encryption-error")
+    assert response.status_code == 500
+    assert response.json()["message"] == "An encryption error occurred."
+    mock_logger.error.assert_called_once()
+

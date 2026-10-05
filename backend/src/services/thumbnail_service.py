@@ -1,10 +1,14 @@
 from typing import Dict, List, Optional
+import uuid
 import pymupdf as fitz
 
 from src.core.config import MinioSettings
 from src.core.dtos import ProcessEventDTO
+from src.core.enums import UploadStatus
+from src.core.exceptions.object_storage_exceptions import ObjectNotFoundError
 from src.core.interfaces.ievent_publisher import IEventPublisher
 from src.core.interfaces.ilogger import ILogger
+from src.core.interfaces.imedia_repository import IMediaRepository
 from src.core.interfaces.iobject_repository import IObjectRepository
 from src.schemas.thumbnail import ThumbnailSpec
 
@@ -30,12 +34,14 @@ class ThumbnailService:
         minio_settings: MinioSettings,
         logger: ILogger,
         publisher: IEventPublisher,
+        media_repo: IMediaRepository,
         specs: Optional[List[ThumbnailSpec]] = None,
     ) -> None:
         self.storage = storage
         self.minio_settings = minio_settings
         self.logger = logger
         self.publisher = publisher
+        self.media_repo = media_repo
         self.specs = specs or list(DEFAULT_SPECS)
 
     async def generate_thumbnails(
@@ -175,4 +181,55 @@ class ThumbnailService:
             self.logger.error("Error generating image thumbnails", exc_info=e)
 
         return thumbnails
+
+    async def get_attachment_thumbnail_url(
+        self,
+        media_id: uuid.UUID,
+        tier: str = "small",
+        expires_in_minutes: int = 60,
+    ) -> str:
+        """
+        Generates a presigned download URL for a specific thumbnail tier of an attachment.
+        """
+        media = await self.media_repo.get_by_id(media_id)
+        if not media:
+            raise ObjectNotFoundError(f"Attachment '{media_id}' was not found.")
+
+        thumbnails = media.thumbnails or {}
+        thumb_key = thumbnails.get(tier)
+        if not thumb_key:
+            raise ObjectNotFoundError(
+                f"Thumbnail tier '{tier}' not found for attachment '{media_id}'."
+            )
+
+        return await self.storage.get_download_url(
+            object_name=thumb_key,
+            expires_in_minutes=expires_in_minutes,
+            bucket=self.minio_settings.THUMBNAILS_BUCKET,
+        )
+
+    async def get_attachment_thumbnail_urls(
+        self,
+        media_id: uuid.UUID,
+        expires_in_minutes: int = 60,
+    ) -> Dict[str, str]:
+        """
+        Generates presigned download URLs for all thumbnail tiers of an attachment.
+        """
+        media = await self.media_repo.get_by_id(media_id)
+        if not media:
+            raise ObjectNotFoundError(f"Attachment '{media_id}' was not found.")
+
+        thumbnails = media.thumbnails or {}
+        if not thumbnails:
+            return {}
+
+        presigned_urls: Dict[str, str] = {}
+        for tier_name, key in thumbnails.items():
+            presigned_urls[tier_name] = await self.storage.get_download_url(
+                object_name=key,
+                expires_in_minutes=expires_in_minutes,
+                bucket=self.minio_settings.THUMBNAILS_BUCKET,
+            )
+        return presigned_urls
 

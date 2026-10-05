@@ -1,4 +1,5 @@
 import axios from "axios";
+import { toApiError } from "./errors";
 
 export const getBaseApiUrl = (): string => {
   if (typeof window !== "undefined" && (window as any)._env_?.VITE_API_URL) {
@@ -23,11 +24,7 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const message =
-      error.response?.data?.detail ||
-      error.response?.data?.message ||
-      error.message ||
-      "An unexpected network error occurred";
-    return Promise.reject(new Error(message));
+    return Promise.reject(toApiError(error));
   }
 );
+

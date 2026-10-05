@@ -628,6 +628,7 @@ async def test_thumbnail_service_fires_upload_confirm(
         minio_settings=minio_settings,
         logger=mock_logger,
         publisher=mock_publisher,
+        media_repo=AsyncMock(),
     )
 
     media_id = uuid.uuid4()

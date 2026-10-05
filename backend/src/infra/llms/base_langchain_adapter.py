@@ -28,6 +28,7 @@ from src.core.exceptions.llm_provider_exceptions import (
     LLMContextLimitExceededError,
     LLMProviderError,
     LLMRateLimitError,
+    LocalModelNotFoundError,
 )
 
 
@@ -204,21 +205,38 @@ class BaseLangChainLLMAdapter(ILLMProvider):
             error=str(exc),
         )
 
-        if "auth" in exc_str or "api_key" in exc_str or "unauthorized" in exc_str:
+        if self._provider_name.lower() == "ollama" and (
+            "not found" in exc_str
+            or "does not exist" in exc_str
+            or "pull" in exc_str
+            or "404" in exc_str
+        ):
+            raise LocalModelNotFoundError(self._model.model) from exc
+
+        if (
+            "auth" in exc_str
+            or "api_key" in exc_str
+            or "unauthorized" in exc_str
+            or "forbidden" in exc_str
+            or "credential" in exc_str
+        ):
             raise LLMAuthenticationError(self._provider_name) from exc
+
         if "rate limit" in exc_str or "429" in exc_str or "quota" in exc_str:
-            raise LLMRateLimitError(retry_after_seconds=60) from exc
+            raise LLMRateLimitError() from exc
+
         if (
             "context length" in exc_str
             or "maximum context" in exc_str
             or "token limit" in exc_str
         ):
-            raise LLMContextLimitExceededError(
-                max_tokens=0, requested_tokens=0
-            ) from exc
+            raise LLMContextLimitExceededError() from exc
+
         if "connection" in exc_str or "refused" in exc_str or "unreachable" in exc_str:
             raise LLMConnectionError(
                 self._provider_name, endpoint="configured endpoint"
             ) from exc
 
-        raise LLMProviderError(f"{self._provider_name} error: {exc}") from exc
+        raise LLMProviderError(
+            f"An error occurred while communicating with {self._provider_name}."
+        ) from exc

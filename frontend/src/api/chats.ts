@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient, getBaseApiUrl } from "./client";
 import {
   ChatCompletionRequest,
   ChatSession,
@@ -61,6 +61,23 @@ export const chatsApi = {
           "Content-Type": "multipart/form-data",
         },
       }
+    );
+    return response.data;
+  },
+
+  getAttachmentThumbnailUrl(
+    mediaId: string,
+    tier: "small" | "medium" | "large" = "small"
+  ): string {
+    const base = getBaseApiUrl().replace(/\/$/, "");
+    return `${base}/chats/attachments/${mediaId}/thumbnail?tier=${tier}`;
+  },
+
+  async getAttachmentThumbnails(
+    mediaId: string
+  ): Promise<Record<string, string>> {
+    const response = await apiClient.get<Record<string, string>>(
+      `/chats/attachments/${mediaId}/thumbnails`
     );
     return response.data;
   },

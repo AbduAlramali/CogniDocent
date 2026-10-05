@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/shared/store/useWorkspaceStore";
 import { chatsApi } from "@/api";
 import { AttachmentTray, LocalFileAttachment } from "./AttachmentTray";
@@ -7,17 +7,18 @@ import { Send, Paperclip, Loader2 } from "lucide-react";
 interface ChatInputBarProps {
   projectId: string;
   onSendMessage: (text: string, attachmentIds: string[]) => Promise<void>;
+  onSendMessageError?: (err: unknown) => void;
   isSending: boolean;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   projectId,
   onSendMessage,
+  onSendMessageError,
   isSending,
 }) => {
   const [input, setInput] = useState("");
   const [localAttachments, setLocalAttachments] = useState<LocalFileAttachment[]>([]);
-  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
   const pendingSnippets = useWorkspaceStore((state) => state.pendingSnippets);
   const clearPendingSnippets = useWorkspaceStore(
@@ -53,21 +54,99 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     }
   }, [input]);
 
+  // Upload a single file or snippet immediately and track its state
+  const uploadSingleAttachment = useCallback(
+    async (attachment: LocalFileAttachment) => {
+      try {
+        const media = await chatsApi.uploadAttachment(
+          projectId,
+          attachment.file,
+          attachment.fileName
+        );
+        setLocalAttachments((prev) =>
+          prev.map((item) =>
+            item.id === attachment.id
+              ? {
+                  ...item,
+                  status: "ready",
+                  mediaId: media.media_id,
+                  error: undefined,
+                }
+              : item
+          )
+        );
+      } catch (err: any) {
+        const errMsg =
+          err?.response?.data?.message ||
+          err?.message ||
+          "Failed to upload attachment";
+        setLocalAttachments((prev) =>
+          prev.map((item) =>
+            item.id === attachment.id
+              ? {
+                  ...item,
+                  status: "error",
+                  error: errMsg,
+                }
+              : item
+          )
+        );
+      }
+    },
+    [projectId]
+  );
+
+  // Ingest snipped screenshots from PDF viewer into local attachments and immediately upload
+  useEffect(() => {
+    if (pendingSnippets.length > 0) {
+      const newSnippets: LocalFileAttachment[] = pendingSnippets.map((snippet) => ({
+        id: snippet.id,
+        file: snippet.blob,
+        fileName: snippet.filename,
+        contentType: "image/png",
+        fileSizeBytes: snippet.blob.size,
+        previewUrl: snippet.previewUrl,
+        status: "uploading",
+        isSnipped: true,
+        pageNum: snippet.pageNum,
+      }));
+
+      setLocalAttachments((prev) => [...prev, ...newSnippets]);
+      clearPendingSnippets();
+
+      newSnippets.forEach((snippetItem) => {
+        uploadSingleAttachment(snippetItem);
+      });
+    }
+  }, [pendingSnippets, clearPendingSnippets, uploadSingleAttachment]);
+
+  // File input change: immediately add with "uploading" status and start background upload
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    const newFiles: LocalFileAttachment[] = Array.from(e.target.files).map((f) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+
+    const filesArray = Array.from(e.target.files);
+    const newItems: LocalFileAttachment[] = filesArray.map((f) => {
       const isImg = f.type.startsWith("image/");
       return {
         id: crypto.randomUUID(),
         file: f,
+        fileName: f.name,
+        contentType: f.type || "application/octet-stream",
+        fileSizeBytes: f.size,
         previewUrl: isImg ? URL.createObjectURL(f) : undefined,
+        status: "uploading",
       };
     });
-    setLocalAttachments((prev) => [...prev, ...newFiles]);
+
+    setLocalAttachments((prev) => [...prev, ...newItems]);
     e.target.value = "";
+
+    newItems.forEach((item) => {
+      uploadSingleAttachment(item);
+    });
   };
 
-  const handleRemoveLocalAttachment = (id: string) => {
+  const handleRemoveAttachment = (id: string) => {
     setLocalAttachments((prev) => {
       const target = prev.find((item) => item.id === id);
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
@@ -82,62 +161,50 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     }
   };
 
+  // State checks for disabling Send button
+  const isAnyUploading = localAttachments.some(
+    (item) => item.status === "uploading"
+  );
+  const readyAttachmentIds = localAttachments
+    .filter((item) => item.status === "ready" && !!item.mediaId)
+    .map((item) => item.mediaId!);
+
+  const hasText = input.trim().length > 0;
+  const hasReadyAttachments = readyAttachmentIds.length > 0;
+  const isSendDisabled =
+    isSending || isAnyUploading || (!hasText && !hasReadyAttachments);
+
   const handleSend = async () => {
+    if (isSendDisabled) return;
+
     const trimmed = input.trim();
-    const hasAttachments = pendingSnippets.length > 0 || localAttachments.length > 0;
-
-    if ((!trimmed && !hasAttachments) || isSending || isUploadingAttachments) return;
-
-    setIsUploadingAttachments(true);
-    const attachmentIds: string[] = [];
+    const messageText =
+      trimmed ||
+      (hasReadyAttachments
+        ? "Please analyze the attached image/document."
+        : "");
 
     try {
-      // 1. Upload snipped screenshots from the PDF
-      for (const snippet of pendingSnippets) {
-        const media = await chatsApi.uploadAttachment(
-          projectId,
-          snippet.blob,
-          snippet.filename
-        );
-        attachmentIds.push(media.media_id);
-      }
+      await onSendMessage(messageText, readyAttachmentIds);
 
-      // 2. Upload local file attachments
-      for (const item of localAttachments) {
-        const media = await chatsApi.uploadAttachment(
-          projectId,
-          item.file,
-          item.file.name
-        );
-        attachmentIds.push(media.media_id);
-      }
-
-      // 3. Dispatch message completion
-      const messageText = trimmed || (attachmentIds.length > 0 ? "Please analyze the attached image/document." : "");
-      await onSendMessage(messageText, attachmentIds);
-
-      // 4. Cleanup
+      // Clean up after successful dispatch
       setInput("");
-      clearPendingSnippets();
       localAttachments.forEach((item) => {
         if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
       });
       setLocalAttachments([]);
     } catch (err) {
       console.error("Failed to send message:", err);
-    } finally {
-      setIsUploadingAttachments(false);
+      onSendMessageError?.(err);
     }
   };
-
-  const isBusy = isSending || isUploadingAttachments;
 
   return (
     <div className="border-t border-border bg-card">
       {/* Attachment Tray for Snipped Screenshots and Local Files */}
       <AttachmentTray
-        localAttachments={localAttachments}
-        onRemoveLocalAttachment={handleRemoveLocalAttachment}
+        attachments={localAttachments}
+        onRemoveAttachment={handleRemoveAttachment}
       />
 
       <div className="p-3 flex items-end gap-2">
@@ -146,19 +213,19 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,.pdf,.txt,.docx"
+          accept="image/*,.pdf,.txt,.docx,.csv,.json"
           onChange={handleFileSelect}
           className="hidden"
-          disabled={isBusy}
+          disabled={isSending}
         />
 
         {/* Attachment Button */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isBusy}
-          className="p-2.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
-          title="Upload file or image attachment"
+          disabled={isSending}
+          className="p-2.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40 cursor-pointer"
+          title="Attach files (images, PDF, documents)"
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -172,11 +239,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              pendingSnippets.length > 0
-                ? "Ask a question about the snipped screenshot..."
+              isAnyUploading
+                ? "Uploading attachment..."
+                : localAttachments.length > 0
+                ? "Add a note or ask a question about the attachment..."
                 : "Ask anything about this document... (Shift+Enter for new line)"
             }
-            disabled={isBusy}
+            disabled={isSending}
             className="w-full resize-none px-3.5 py-2.5 text-sm bg-background text-foreground border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all disabled:opacity-60 max-h-40"
           />
         </div>
@@ -185,16 +254,15 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         <button
           type="button"
           onClick={handleSend}
-          disabled={
-            (!input.trim() &&
-              pendingSnippets.length === 0 &&
-              localAttachments.length === 0) ||
-            isBusy
+          disabled={isSendDisabled}
+          className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/95 disabled:opacity-40 disabled:pointer-events-none transition-all shrink-0 shadow-sm cursor-pointer"
+          title={
+            isAnyUploading
+              ? "Please wait for attachments to finish uploading"
+              : "Send message"
           }
-          className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/95 disabled:opacity-40 disabled:pointer-events-none transition-all shrink-0 shadow-sm"
-          title="Send message"
         >
-          {isBusy ? (
+          {isSending || isAnyUploading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
           ) : (
             <Send className="w-5 h-5" />

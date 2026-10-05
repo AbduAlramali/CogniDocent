@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceStore } from "@/shared/store/useWorkspaceStore";
-import { chatsApi, providersApi } from "@/api";
+import {
+  chatsApi,
+  providersApi,
+  toApiError,
+  getErrorTitle,
+  extractOllamaCommand,
+} from "@/api";
 import { MessageWithAttachments } from "@/types";
 import { ChatHeader } from "./ChatHeader";
 import { MessageItem } from "./MessageItem";
@@ -16,6 +22,7 @@ export const ChatContainer: React.FC = () => {
   const jumpToPage = useWorkspaceStore((state) => state.jumpToPage);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSentPromptRef = useRef<{ message: string; attachmentIds: string[] } | null>(null);
   const [localMessages, setLocalMessages] = useState<MessageWithAttachments[]>([]);
 
   // 1. Fetch chat sessions for current project
@@ -73,13 +80,24 @@ export const ChatContainer: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ["chats", activeProjectId] });
       queryClient.invalidateQueries({ queryKey: ["messages", assistantMessage.chat_id] });
     },
-    onError: (err: any) => {
-      // Append an assistant error notification
+    onError: (err: unknown) => {
+      // Append structured red error box in place of what should be the LLM's response
+      const apiErr = toApiError(err);
       const errorMsg: MessageWithAttachments = {
         message_id: crypto.randomUUID(),
         chat_id: activeChatId || "error",
         role: "assistant",
-        content: `**Error**: ${err.message || "Failed to generate completion."}`,
+        content: apiErr.message,
+        is_error: true,
+        error_info: {
+          title: getErrorTitle(apiErr.category),
+          message: apiErr.message,
+          category: apiErr.category,
+          statusCode: apiErr.statusCode,
+          suggestion: apiErr.suggestion,
+          command: extractOllamaCommand(apiErr.message),
+          canRetry: true,
+        },
         created_at: new Date().toISOString(),
       };
       setLocalMessages((prev) => [...prev, errorMsg]);
@@ -87,6 +105,8 @@ export const ChatContainer: React.FC = () => {
   });
 
   const handleSendMessage = async (text: string, attachmentIds: string[]) => {
+    lastSentPromptRef.current = { message: text, attachmentIds };
+
     // 1. Optimistically append user message
     const optimisticUserMsg: MessageWithAttachments = {
       message_id: crypto.randomUUID(),
@@ -98,7 +118,44 @@ export const ChatContainer: React.FC = () => {
     setLocalMessages((prev) => [...prev, optimisticUserMsg]);
 
     // 2. Trigger API completion
-    await sendMutation.mutateAsync({ message: text, attachmentIds });
+    try {
+      await sendMutation.mutateAsync({ message: text, attachmentIds });
+    } catch {
+      // Handled in sendMutation.onError
+    }
+  };
+
+  const handleRetry = async (errorMessageId: string) => {
+    if (!lastSentPromptRef.current) return;
+    // Remove the error box from the chat feed
+    setLocalMessages((prev) => prev.filter((m) => m.message_id !== errorMessageId));
+    // Re-trigger the completion
+    try {
+      await sendMutation.mutateAsync(lastSentPromptRef.current);
+    } catch {
+      // Handled in sendMutation.onError
+    }
+  };
+
+  const handleSendMessageError = (err: unknown) => {
+    const apiErr = toApiError(err);
+    const errorMsg: MessageWithAttachments = {
+      message_id: crypto.randomUUID(),
+      chat_id: activeChatId || "error",
+      role: "assistant",
+      content: apiErr.message,
+      is_error: true,
+      error_info: {
+        title: "Attachment Upload Failed",
+        message: apiErr.message,
+        category: "bad_request",
+        statusCode: apiErr.statusCode,
+        suggestion: "Check your file format or size and try attaching again.",
+        canRetry: false,
+      },
+      created_at: new Date().toISOString(),
+    };
+    setLocalMessages((prev) => [...prev, errorMsg]);
   };
 
   const handleNewChat = () => {
@@ -157,6 +214,11 @@ export const ChatContainer: React.FC = () => {
             key={msg.message_id}
             message={msg}
             onCitationClick={(page) => jumpToPage(page)}
+            onRetry={
+              msg.is_error || !!msg.error_info
+                ? () => handleRetry(msg.message_id)
+                : undefined
+            }
           />
         ))}
 
@@ -180,6 +242,7 @@ export const ChatContainer: React.FC = () => {
       <ChatInputBar
         projectId={activeProjectId}
         onSendMessage={handleSendMessage}
+        onSendMessageError={handleSendMessageError}
         isSending={sendMutation.isPending}
       />
     </div>

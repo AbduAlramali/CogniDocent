@@ -1,12 +1,26 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import uuid
-from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
+from fastapi.responses import RedirectResponse
 
-from src.dependencies import get_chat_service
+from src.dependencies import (
+    get_chat_service,
+    get_thumbnail_service,
+)
 from src.schemas.chat import ChatCompletionRequest, ChatResponse
 from src.schemas.media import MediaResponse
 from src.schemas.message import MessageWithAttachments
 from src.services.chat_service import ChatService
+from src.services.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
@@ -119,3 +133,45 @@ async def upload_attachment(
         file_hash=file_hash,
     )
     return MediaResponse.model_validate(media)
+
+
+@router.get(
+    "/attachments/{media_id}/thumbnails",
+    response_model=Dict[str, str],
+    status_code=status.HTTP_200_OK,
+    summary="Get Attachment Thumbnails",
+    description="Returns presigned download URLs for all available thumbnail tiers of an attachment.",
+    responses={
+        200: {
+            "description": "Presigned download URLs for each thumbnail tier.",
+            "model": Dict[str, str],
+        },
+        404: {"description": "Attachment not found."},
+    },
+)
+async def get_attachment_thumbnails(
+    media_id: uuid.UUID = Path(..., description="UUID of the media attachment"),
+    thumbnail_service: ThumbnailService = Depends(get_thumbnail_service),
+) -> Dict[str, str]:
+    return await thumbnail_service.get_attachment_thumbnail_urls(media_id)
+
+
+@router.get(
+    "/attachments/{media_id}/thumbnail",
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    summary="Download Attachment Thumbnail",
+    description="Redirects to the presigned download URL for the requested thumbnail tier.",
+    responses={
+        307: {"description": "Redirects to the presigned download URL in object storage."},
+        404: {"description": "Attachment or requested thumbnail tier not found."},
+    },
+)
+async def download_attachment_thumbnail(
+    media_id: uuid.UUID = Path(..., description="UUID of the media attachment"),
+    tier: str = Query(default="small", description="Thumbnail tier: small, medium, large"),
+    thumbnail_service: ThumbnailService = Depends(get_thumbnail_service),
+) -> RedirectResponse:
+    url = await thumbnail_service.get_attachment_thumbnail_url(media_id, tier=tier)
+    response = RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response

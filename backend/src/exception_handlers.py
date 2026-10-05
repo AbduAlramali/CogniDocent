@@ -29,11 +29,14 @@ from src.core.exceptions.fast_parser_exceptions import (
     FastParserError,
     ParserResourceLimitError,
 )
+from src.core.exceptions.encryption_exceptions import EncryptionError
 from src.core.exceptions.http_exceptions import HTTPClientError, HTTPTimeoutError
+from src.core.exceptions.keystore_exceptions import KeyStoreError
 from src.core.exceptions.llm_provider_exceptions import (
     LLMContextLimitExceededError,
     LLMProviderError,
     LLMRateLimitError,
+    LocalModelNotFoundError,
 )
 from src.core.exceptions.logger_exceptions import LoggerError
 from src.core.exceptions.notification_exceptions import NotificationError
@@ -88,6 +91,15 @@ def register_exception_handlers(app: FastAPI, logger: ILogger) -> None:
         request: Request, exc: FileNotFoundError
     ) -> JSONResponse:
         logger.warning(f"File not found on path {request.url.path}: {str(exc)}")
+        return JSONResponse(status_code=404, content={"message": str(exc)})
+
+    @app.exception_handler(LocalModelNotFoundError)
+    async def local_model_not_found_handler(
+        request: Request, exc: LocalModelNotFoundError
+    ) -> JSONResponse:
+        logger.warning(
+            f"Local model not found on path {request.url.path}: {str(exc)}"
+        )
         return JSONResponse(status_code=404, content={"message": str(exc)})
 
     # 409 - Conflict
@@ -272,6 +284,28 @@ def register_exception_handlers(app: FastAPI, logger: ILogger) -> None:
         )
         return JSONResponse(
             status_code=500, content={"message": "A database error occurred."}
+        )
+
+    @app.exception_handler(KeyStoreError)
+    async def keystore_error_handler(
+        request: Request, exc: KeyStoreError
+    ) -> JSONResponse:
+        logger.error(
+            f"Key store error on path {request.url.path}: {str(exc)}", exc=exc
+        )
+        return JSONResponse(
+            status_code=500, content={"message": "A key store error occurred."}
+        )
+
+    @app.exception_handler(EncryptionError)
+    async def encryption_error_handler(
+        request: Request, exc: EncryptionError
+    ) -> JSONResponse:
+        logger.error(
+            f"Encryption error on path {request.url.path}: {str(exc)}", exc=exc
+        )
+        return JSONResponse(
+            status_code=500, content={"message": "An encryption error occurred."}
         )
 
     @app.exception_handler(ObjectRepositoryError)

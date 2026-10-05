@@ -24,6 +24,8 @@ from src.core.interfaces.iantivirus_service import IAntivirusService
 from src.core.interfaces.inotification_service import INotificationService
 from src.core.interfaces.ichat_orchestrator import IChatOrchestrator
 from src.core.interfaces.ifast_parser import IFastParser
+from src.core.interfaces.ikey_store import IKeyStore
+from src.core.interfaces.iencryptor import IEncryptor
 from pydantic import BaseModel
 from src.infra.llms.litellm_embedding_adapter import LiteLLMEmbeddingAdapter
 from src.services.embedding_service import EmbeddingService
@@ -218,13 +220,34 @@ def get_pdf_service(
     )
 
 
-def get_encryption_service():
+def get_keystore() -> IKeyStore:
+    """
+    Dependency that provides an instance of IKeyStore backed by KeyringAdapter.
+    """
+    from src.infra.keyring_adapter import KeyringAdapter
+
+    return KeyringAdapter()
+
+
+def get_encryptor() -> IEncryptor:
+    """
+    Dependency that provides an instance of IEncryptor backed by FernetAdapter.
+    """
+    from src.infra.fernet_adapter import FernetAdapter
+
+    return FernetAdapter()
+
+
+def get_encryption_service(
+    keystore: IKeyStore = Depends(get_keystore),
+    encryptor: IEncryptor = Depends(get_encryptor),
+):
     """
     Dependency that provides the EncryptionService for securing API keys.
     """
     from src.services.encryption_service import EncryptionService
 
-    return EncryptionService()
+    return EncryptionService(keystore=keystore, encryptor=encryptor)
 
 
 def get_http_client(
@@ -393,6 +416,7 @@ def get_thumbnail_service(
     storage: IObjectRepository = Depends(get_object_repository),
     logger: ILogger = Depends(get_logger),
     publisher: IEventPublisher = Depends(get_event_publisher),
+    media_repo: IMediaRepository = Depends(get_media_repository),
 ):
     """
     Dependency that provides an instance of ThumbnailService.
@@ -405,6 +429,7 @@ def get_thumbnail_service(
         minio_settings=get_minio_settings(),
         logger=logger,
         publisher=publisher,
+        media_repo=media_repo,
     )
 
 

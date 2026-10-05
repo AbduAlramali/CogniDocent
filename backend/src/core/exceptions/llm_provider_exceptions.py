@@ -30,17 +30,25 @@ class LLMAuthenticationError(LLMProviderError):
 class LLMContextLimitExceededError(LLMProviderError):
     """Raised when the conversation history and retrieved documents exceed the model's token limit."""
 
-    def __init__(self, max_tokens: int, requested_tokens: int):
-        super().__init__(
-            f"Context limit exceeded. Model allows {max_tokens}, but prompt requires {requested_tokens}."
-        )
+    def __init__(
+        self,
+        message: str = "Context limit exceeded. The prompt is too large for this model.",
+    ):
+        super().__init__(message)
 
 
 class LLMRateLimitError(LLMProviderError):
     """Raised when a cloud provider throttles the application."""
 
-    def __init__(self, retry_after_seconds: int):
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded. Please wait a moment before trying again.",
+    ):
+        super().__init__(message)
+
+
+class LocalModelNotFoundError(LLMProviderError):
+    def __init__(self, model_name: str):
         super().__init__(
-            f"Rate limit exceeded. Retry after {retry_after_seconds} seconds."
+            f"Model '{model_name}' is not downloaded. Run `ollama run {model_name}` first."
         )
-        self.retry_after_seconds = retry_after_seconds
